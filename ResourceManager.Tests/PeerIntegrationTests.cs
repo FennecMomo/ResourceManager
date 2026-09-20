@@ -1,0 +1,174 @@
+using System.Net;
+using System.Net.Sockets;
+using ResourceManager.Core;
+
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
+namespace ResourceManager.Tests;
+
+public sealed class PeerIntegrationTests
+{
+    [Fact]
+    public async Task Peers_ExchangeCatalog_AndDownloadFileAndFolder()
+    {
+        using var space = new TestSpace();
+        var a = new NodeStore(space.PathFor("a"));
+        var b = new NodeStore(space.PathFor("b"));
+        var aFile = space.Write("a-public.txt", "来自 A");
+        var bFile = space.Write("b-public.txt", "来自 B");
+        var folder = space.PathFor("source-folder");
+        Directory.CreateDirectory(Path.Combine(folder, "nested"));
+        Directory.CreateDirectory(Path.Combine(folder, "empty"));
+        File.WriteAllText(Path.Combine(folder, "nested", "readme.txt"), "文件夹内容");
+        a.AddResource(aFile, PublishMode.Reference);
+        var sharedFile = b.AddResource(bFile, PublishMode.Reference);
+        var sharedFolder = b.AddResource(folder, PublishMode.Copy);
+        var portA = FreePort();
+        var portB = FreePort();
+        a.SaveSettings("甲", null, portA, true);
+        b.SaveSettings("乙", null, portB, true);
+        await using var nodeA = new PeerNode(a);
+        await using var nodeB = new PeerNode(b);
+        await nodeA.StartAsync(portA, "127.0.0.1");
+        await nodeB.StartAsync(portB, "127.0.0.1");
+        using var clientA = new PeerClient(a);
+        using var clientB = new PeerClient(b);
+        var peerB = await clientA.ConnectAsync("127.0.0.1", portB);
+        Assert.Equal("乙", peerB.Nickname);
+        Assert.Equal("甲", b.GetPeers().Single().Nickname);
+        var bCatalog = await clientA.GetResourcesAsync(peerB);
+        Assert.Equal(2, bCatalog.Count);
+        Assert.Contains(bCatalog, r => r.Id == sharedFile.Id && r.Available);
+        Assert.Contains(bCatalog, r => r.Id == sharedFolder.Id && r.Kind == ResourceKind.Folder && r.Available);
+        Assert.Single(await clientB.GetResourcesAsync(b.GetPeers().Single()));
+
+        var downloads = new DownloadManager(a, clientA);
+        var output = space.PathFor("output");
+        var fileJob = downloads.CreateJob(peerB, bCatalog.Single(r => r.Id == sharedFile.Id), output);
+        await downloads.RunAsync(fileJob.Id);
+        Assert.Equal("来自 B", File.ReadAllText(fileJob.TargetPath));
+        var folderJob = downloads.CreateJob(peerB, bCatalog.Single(r => r.Id == sharedFolder.Id), output);
+        await downloads.RunAsync(folderJob.Id);
+        Assert.Equal("文件夹内容", File.ReadAllText(Path.Combine(folderJob.TargetPath, "nested", "readme.txt")));
+        Assert.True(Directory.Exists(Path.Combine(folderJob.TargetPath, "empty")));
+    }
+
+    [Fact]
+    public async Task Favorites_RemainOffline_AndWithdrawnResourceIsDistinct()
+    {
+        using var space = new TestSpace();
+        var a = new NodeStore(space.PathFor("a"));
+        var b = new NodeStore(space.PathFor("b"));
+        var source = space.Write("source.txt", "初始内容");
+        var reference = b.AddResource(source, PublishMode.Reference);
+        var copy = b.AddResource(source, PublishMode.Copy);
+        File.WriteAllText(source, "修改后的内容更长");
+        var catalog = new ResourceCatalog(b).List();
+        Assert.True(catalog.Single(r => r.Id == reference.Id).Size > catalog.Single(r => r.Id == copy.Id).Size);
+        File.Delete(source);
+        catalog = new ResourceCatalog(b).List();
+        Assert.False(catalog.Single(r => r.Id == reference.Id).Available);
+        Assert.True(catalog.Single(r => r.Id == copy.Id).Available);
+        var portA = FreePort();
+        var portB = FreePort();
+        a.SaveSettings("甲", null, portA, true);
+        b.SaveSettings("乙", null, portB, true);
+        await using var nodeA = new PeerNode(a);
+        await using var nodeB = new PeerNode(b);
+        await nodeA.StartAsync(portA, "127.0.0.1");
+        await nodeB.StartAsync(portB, "127.0.0.1");
+        using var clientA = new PeerClient(a);
+        var peerB = await clientA.ConnectAsync("127.0.0.1", portB);
+        a.SaveFavorite(new Favorite(peerB.DeviceId, reference.Id, reference.Name, ResourceKind.File));
+        await nodeB.StopAsync();
+        Assert.Single(a.GetFavorites());
+        await Assert.ThrowsAnyAsync<Exception>(() => clientA.GetResourcesAsync(peerB));
+        await nodeB.StartAsync(portB, "127.0.0.1");
+        b.RemoveResource(reference.Id);
+        Assert.DoesNotContain(await clientA.GetResourcesAsync(peerB), r => r.Id == reference.Id);
+        Assert.Single(a.GetFavorites());
+        Assert.NotNull(b.GetResource(copy.Id));
+    }
+
+    [Fact]
+    public async Task PartialFile_ResumesWithRange_AndTraversalIsRejected()
+    {
+        using var space = new TestSpace();
+        var a = new NodeStore(space.PathFor("a"));
+        var b = new NodeStore(space.PathFor("b"));
+        var source = space.PathFor("large.bin");
+        var bytes = new byte[1024 * 1024];
+        Random.Shared.NextBytes(bytes);
+        File.WriteAllBytes(source, bytes);
+        var shared = b.AddResource(source, PublishMode.Reference);
+        var folder = space.PathFor("folder");
+        Directory.CreateDirectory(folder);
+        var publishedFolder = b.AddResource(folder, PublishMode.Reference);
+        Assert.Throws<ArgumentException>(() => new ResourceCatalog(b).ResolveFile(publishedFolder.Id, "../large.bin"));
+        var portA = FreePort();
+        var portB = FreePort();
+        a.SaveSettings("甲", null, portA, true);
+        b.SaveSettings("乙", null, portB, true);
+        await using var nodeA = new PeerNode(a);
+        await using var nodeB = new PeerNode(b);
+        await nodeA.StartAsync(portA, "127.0.0.1");
+        await nodeB.StartAsync(portB, "127.0.0.1");
+        using var clientA = new PeerClient(a);
+        var peerB = await clientA.ConnectAsync("127.0.0.1", portB);
+        var resource = (await clientA.GetResourcesAsync(peerB)).Single(r => r.Id == shared.Id);
+        var downloads = new DownloadManager(a, clientA);
+        var job = downloads.CreateJob(peerB, resource, space.PathFor("output"));
+        using (var response = await clientA.OpenFileAsync(peerB, resource.Id, "", 0, null))
+        {
+            response.EnsureSuccessStatusCode();
+            var tag = response.Headers.ETag?.ToString();
+            Assert.False(string.IsNullOrWhiteSpace(tag));
+            await File.WriteAllTextAsync(job.TargetPath + ".rm-etag", tag);
+            await using var input = await response.Content.ReadAsStreamAsync();
+            await using var output = File.Create(job.TargetPath + ".rm-part");
+            var prefix = new byte[128 * 1024];
+            await input.ReadExactlyAsync(prefix);
+            await output.WriteAsync(prefix);
+        }
+        await downloads.RunAsync(job.Id);
+        Assert.Equal(bytes, File.ReadAllBytes(job.TargetPath));
+        Assert.False(File.Exists(job.TargetPath + ".rm-part"));
+        Assert.Equal("已完成", a.GetDownload(job.Id)?.Status);
+    }
+
+    [Fact]
+    public async Task PortConflict_ReportsFailure_WithoutStartingSecondNode()
+    {
+        using var space = new TestSpace();
+        var port = FreePort();
+        await using var first = new PeerNode(new NodeStore(space.PathFor("a")));
+        await using var second = new PeerNode(new NodeStore(space.PathFor("b")));
+        await first.StartAsync(port, "127.0.0.1");
+        await Assert.ThrowsAnyAsync<Exception>(() => second.StartAsync(port, "127.0.0.1"));
+        Assert.True(first.IsRunning);
+        Assert.False(second.IsRunning);
+    }
+
+    private static int FreePort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
+
+    private sealed class TestSpace : IDisposable
+    {
+        private readonly string root = Path.Combine(Path.GetTempPath(), "ResourceManagerTests", Guid.NewGuid().ToString("N"));
+        public string PathFor(string name) => Path.Combine(root, name);
+        public string Write(string name, string text)
+        {
+            Directory.CreateDirectory(root);
+            var path = PathFor(name);
+            File.WriteAllText(path, text);
+            return path;
+        }
+        public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+}

@@ -1,0 +1,20 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+.vscode/
+dist/
+TestResults/
+*.user
+*.suo
+*.log
+resources.db*
+
+# Git authentication and signing material stays on the developer machine.
+.git-auth.local.json
+.git-ssh-key.local
+.git-ssh-key.local.pub
+*.pfx
+*.p12
+*.pem
+*.key

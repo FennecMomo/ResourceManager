@@ -1,0 +1,166 @@
+<Window x:Class="ResourceManager.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="资源管理器" Width="1120" Height="760" MinWidth="900" MinHeight="620"
+        WindowStartupLocation="CenterScreen" Background="#F5F7FB"
+        Closing="Window_Closing" Loaded="Window_Loaded">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="13,7"/><Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="Background" Value="#1D5FCB"/><Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="8,6"/><Setter Property="Margin" Value="0,0,8,0"/>
+        </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="AutoGenerateColumns" Value="False"/><Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="SelectionMode" Value="Single"/><Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="RowHeight" Value="38"/><Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#DDE3EC"/>
+        </Style>
+        <Style TargetType="TabItem"><Setter Property="Padding" Value="20,10"/><Setter Property="FontSize" Value="15"/></Style>
+    </Window.Resources>
+    <Grid Margin="24">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid Grid.Row="0" Margin="0,0,0,18">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="资源管理器" FontSize="27" FontWeight="Bold" Foreground="#17233B"/>
+                <TextBlock Text="公司内网 · 点对点资源共享" FontSize="13" Foreground="#66748B"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                <TextBlock x:Name="IdentityText" FontSize="14" FontWeight="SemiBold" Foreground="#17233B" TextAlignment="Right"/>
+                <TextBlock x:Name="AddressText" FontSize="12" TextAlignment="Right" Foreground="#66748B"/>
+            </StackPanel>
+        </Grid>
+        <TabControl x:Name="Tabs" Grid.Row="1" SelectedIndex="0" SelectionChanged="Tabs_SelectionChanged">
+            <TabItem Header="设备">
+                <Grid Margin="16">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="330"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Grid Grid.Column="0">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <TextBlock Text="连接设备" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                        <StackPanel Grid.Row="1" Margin="0,0,0,12">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBox x:Name="PeerIpBox" Width="192" ToolTip="IPv4 地址，例如 192.168.1.20"/>
+                                <TextBox x:Name="PeerPortBox" Width="94" Text="37642" ToolTip="监听端口"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="连接" Click="Connect_Click"/>
+                                <Button Content="更新所选地址" Click="UpdateAddress_Click" Background="#62748F"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <DataGrid x:Name="PeersGrid" Grid.Row="2" ItemsSource="{Binding Peers}" SelectionChanged="PeersGrid_SelectionChanged">
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Header=" " Width="40"><DataGridTemplateColumn.CellTemplate><DataTemplate><Image Source="{Binding Avatar}" Width="26" Height="26"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
+                                <DataGridTextColumn Header="昵称" Binding="{Binding Nickname}" Width="*"/>
+                                <DataGridTextColumn Header="IP" Binding="{Binding Ip}" Width="100"/>
+                                <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="76"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button Content="刷新状态" Click="Refresh_Click"/><Button Content="移除设备" Click="RemovePeer_Click" Background="#9B4651"/>
+                        </StackPanel>
+                    </Grid>
+                    <Grid Grid.Column="2">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <TextBlock x:Name="PeerHeading" Text="请选择一台设备" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                        <DataGrid x:Name="RemoteGrid" Grid.Row="1" ItemsSource="{Binding RemoteResources}" SelectionChanged="RemoteGrid_SelectionChanged">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="资源名称" Binding="{Binding Name}" Width="*"/>
+                                <DataGridTextColumn Header="类型" Binding="{Binding Kind}" Width="70"/>
+                                <DataGridTextColumn Header="发布方式" Binding="{Binding Mode}" Width="90"/>
+                                <DataGridTextColumn Header="大小" Binding="{Binding Size}" Width="105"/>
+                                <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="90"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button x:Name="RemoteFavoriteButton" Content="收藏选中资源" Click="Favorite_Click" IsEnabled="False"/><Button x:Name="RemoteDownloadButton" Content="下载选中资源" Click="DownloadRemote_Click" IsEnabled="False"/>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="我的发布">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                        <TextBlock Text="本机共享的资源" FontSize="19" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,18,0"/>
+                        <Button Content="发布文件" Click="PublishFile_Click"/><Button Content="发布文件夹" Click="PublishFolder_Click"/>
+                    </StackPanel>
+                    <DataGrid x:Name="LocalGrid" Grid.Row="1" ItemsSource="{Binding LocalResources}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="名称" Binding="{Binding Name}" Width="*"/>
+                            <DataGridTextColumn Header="类型" Binding="{Binding Kind}" Width="85"/>
+                            <DataGridTextColumn Header="发布方式" Binding="{Binding Mode}" Width="105"/>
+                            <DataGridTextColumn Header="大小" Binding="{Binding Size}" Width="110"/>
+                            <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="100"/>
+                            <DataGridTextColumn Header="本机路径" Binding="{Binding Path}" Width="2*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                        <Button Content="刷新" Click="RefreshLocal_Click"/><Button Content="撤销选中发布" Click="RemoveResource_Click" Background="#9B4651"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+            <TabItem Header="收藏">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Text="收藏的远端入口" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,14"/>
+                    <DataGrid x:Name="FavoritesGrid" Grid.Row="1" ItemsSource="{Binding Favorites}" SelectionChanged="FavoritesGrid_SelectionChanged">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="资源名称" Binding="{Binding Name}" Width="*"/>
+                            <DataGridTextColumn Header="发布者" Binding="{Binding PeerName}" Width="180"/>
+                            <DataGridTextColumn Header="类型" Binding="{Binding Kind}" Width="100"/>
+                            <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="150"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                        <Button Content="刷新状态" Click="Refresh_Click"/><Button x:Name="FavoriteDownloadButton" Content="下载选中资源" Click="DownloadFavorite_Click" IsEnabled="False"/>
+                        <Button Content="取消收藏" Click="RemoveFavorite_Click" Background="#9B4651"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+            <TabItem Header="下载">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Text="下载记录" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,14"/>
+                    <DataGrid x:Name="DownloadsGrid" Grid.Row="1" ItemsSource="{Binding Downloads}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="资源" Binding="{Binding Name}" Width="*"/>
+                            <DataGridTextColumn Header="发布者" Binding="{Binding PeerName}" Width="145"/>
+                            <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="95"/>
+                            <DataGridTextColumn Header="进度" Binding="{Binding Progress}" Width="145"/>
+                            <DataGridTextColumn Header="保存位置" Binding="{Binding Target}" Width="2*"/>
+                            <DataGridTextColumn Header="错误" Binding="{Binding Error}" Width="180"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                        <Button Content="继续选中任务" Click="ResumeDownload_Click"/><Button Content="打开保存位置" Click="OpenDownloadFolder_Click"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+            <TabItem Header="设置">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="20" Width="470" HorizontalAlignment="Left">
+                    <TextBlock Text="本机资料" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,16"/>
+                    <TextBlock Text="昵称" Margin="0,0,0,5"/><TextBox x:Name="NicknameBox" Margin="0,0,0,15"/>
+                    <TextBlock Text="头像" Margin="0,0,0,5"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,22">
+                        <Image x:Name="AvatarPreview" Width="64" Height="64" Margin="0,0,15,0"/>
+                        <Button Content="选择头像" Click="ChooseAvatar_Click" VerticalAlignment="Center"/>
+                        <Button Content="清除头像" Click="ClearAvatar_Click" VerticalAlignment="Center" Background="#62748F"/>
+                    </StackPanel>
+                    <TextBlock Text="网络" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                    <TextBlock Text="监听端口" Margin="0,0,0,5"/>
+                    <TextBox x:Name="ListenPortBox" Width="140" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+                    <CheckBox x:Name="CloseToTrayBox" Content="点击关闭按钮时缩到系统托盘" Margin="0,0,0,18"/>
+                    <Button Content="保存设置" Click="SaveSettings_Click" HorizontalAlignment="Left"/>
+                    <TextBlock Text="设备 ID" Margin="0,25,0,5" Foreground="#66748B"/>
+                    <TextBlock x:Name="DeviceIdText" TextWrapping="Wrap" Foreground="#66748B"/>
+                    <TextBlock Text="对方可通过本机 IP 和监听端口连接。若 Windows 防火墙提示，请允许公司网络访问。" TextWrapping="Wrap" Foreground="#66748B" Margin="0,20,0,0"/>
+                </StackPanel></ScrollViewer>
+            </TabItem>
+        </TabControl>
+        <TextBlock x:Name="StatusText" Grid.Row="2" Text="正在启动…" Foreground="#52647C" Margin="0,12,0,0" FontSize="12"/>
+    </Grid>
+</Window>
