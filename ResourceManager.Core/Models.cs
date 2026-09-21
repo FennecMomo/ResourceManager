@@ -16,7 +16,7 @@ public sealed record RemoteResource(string Id, string Name, ResourceKind Kind, P
 public sealed record RemoteFile(string RelativePath, long Size, DateTimeOffset ModifiedUtc, bool IsDirectory = false);
 public sealed record Favorite(string PeerId, string ResourceId, string Name, ResourceKind Kind);
 public sealed record DownloadJob(string Id, string PeerId, string ResourceId, string ResourceName, ResourceKind Kind, string TargetPath, string Status, long DownloadedBytes, long TotalBytes, string? Error);
-public sealed record AppSettings(NodeProfile Profile, int ListenPort, bool CloseToTray);
+public sealed record AppSettings(NodeProfile Profile, int ListenPort, bool CloseToTray, bool AutoUpdate);
 
 public static class NodeDefaults
 {

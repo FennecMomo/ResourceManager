@@ -36,6 +36,7 @@ public sealed class NodeStore
         if (GetSetting("nickname") is null) SetSetting("nickname", Environment.UserName);
         if (GetSetting("port") is null) SetSetting("port", NodeDefaults.Port.ToString(CultureInfo.InvariantCulture));
         if (GetSetting("close_to_tray") is null) SetSetting("close_to_tray", "1");
+        if (GetSetting("auto_update") is null) SetSetting("auto_update", "0");
     }
 
     private SqliteConnection Open()
@@ -78,10 +79,13 @@ public sealed class NodeStore
     {
         var avatarPath = Path.Combine(DataDirectory, "avatar.png");
         var profile = new NodeProfile(GetSetting("device_id")!, GetSetting("nickname")!, File.Exists(avatarPath) ? File.ReadAllBytes(avatarPath) : null);
-        return new AppSettings(profile, int.Parse(GetSetting("port")!, CultureInfo.InvariantCulture), GetSetting("close_to_tray") == "1");
+        return new AppSettings(profile, int.Parse(GetSetting("port")!, CultureInfo.InvariantCulture), GetSetting("close_to_tray") == "1", GetSetting("auto_update") == "1");
     }
 
     public void SaveSettings(string nickname, byte[]? avatar, int port, bool closeToTray)
+        => SaveSettings(nickname, avatar, port, closeToTray, GetSetting("auto_update") == "1");
+
+    public void SaveSettings(string nickname, byte[]? avatar, int port, bool closeToTray, bool autoUpdate)
     {
         nickname = nickname.Trim();
         if (nickname.Length is < 1 or > 80) throw new ArgumentException("昵称须为 1 至 80 个字符。");
@@ -90,6 +94,7 @@ public sealed class NodeStore
         SetSetting("nickname", nickname);
         SetSetting("port", port.ToString(CultureInfo.InvariantCulture));
         SetSetting("close_to_tray", closeToTray ? "1" : "0");
+        SetSetting("auto_update", autoUpdate ? "1" : "0");
         var path = Path.Combine(DataDirectory, "avatar.png");
         if (avatar is null) { if (File.Exists(path)) File.Delete(path); }
         else File.WriteAllBytes(path, avatar);

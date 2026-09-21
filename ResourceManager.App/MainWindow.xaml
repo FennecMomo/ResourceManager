@@ -343,7 +343,13 @@
                             <TextBlock Text="连接与运行" Style="{StaticResource PageHeading}"/><TextBlock Text="对方通过你的 IP 地址和监听端口连接。" Style="{StaticResource Caption}" Margin="0,5,0,22"/>
                             <TextBlock Text="监听端口" Style="{StaticResource Caption}" Margin="0,0,0,6"/><TextBox x:Name="ListenPortBox" Width="150" HorizontalAlignment="Left" Margin="0,0,0,18"/>
                             <CheckBox x:Name="CloseToTrayBox" Content="关闭窗口后继续在系统托盘共享" FontSize="13" Foreground="{StaticResource Ink}" Margin="0,0,0,8"/>
-                            <TextBlock Text="在托盘菜单选择“退出并停止共享”才会完全离线。" Style="{StaticResource Caption}"/>
+                            <CheckBox x:Name="AutoStartBox" Content="登录 Windows 后自动启动并在托盘共享" FontSize="13" Foreground="{StaticResource Ink}" Margin="0,0,0,8"/>
+                            <TextBlock Text="开机启动仅为当前 Windows 用户设置，不需要管理员权限。" Style="{StaticResource Caption}"/>
+                        </StackPanel></Border>
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
+                            <TextBlock Text="软件更新" Style="{StaticResource PageHeading}"/><TextBlock Text="从项目的 GitHub Release 下载并校验官方更新包。" Style="{StaticResource Caption}" Margin="0,5,0,22"/>
+                            <CheckBox x:Name="AutoUpdateBox" Content="启动后自动检查更新" FontSize="13" Foreground="{StaticResource Ink}" Margin="0,0,0,12"/>
+                            <StackPanel Orientation="Horizontal"><Button x:Name="CheckUpdateButton" Content="检查更新" Click="CheckUpdate_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/><TextBlock x:Name="UpdateStatusText" Text="当前版本" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/></StackPanel>
                         </StackPanel></Border>
                         <Button Content="保存设置" Click="SaveSettings_Click" HorizontalAlignment="Left" Margin="0,0,0,20"/>
                         <TextBlock Text="设备 ID" Style="{StaticResource Caption}" FontWeight="SemiBold"/><TextBlock x:Name="DeviceIdText" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,5,0,0"/>

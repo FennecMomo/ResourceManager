@@ -1,0 +1,46 @@
+name: 发布 ResourceManager 版本
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: 读取发布源码
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 准备 .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: 核对标签与项目版本
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          [xml]$project = Get-Content ResourceManager.App/ResourceManager.App.csproj
+          $version = ($project.Project.PropertyGroup | Where-Object Version).Version
+          if ($env:RELEASE_TAG -ne "v$version") {
+            throw "标签 $env:RELEASE_TAG 与项目版本 $version 不一致。"
+          }
+
+      - name: 测试
+        run: dotnet test ResourceManager.Tests/ResourceManager.Tests.csproj -c Release
+
+      - name: 构建 Windows x64 单文件程序
+        run: dotnet publish ResourceManager.App/ResourceManager.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o dist/release
+
+      - name: 发布 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME dist/release/ResourceManager.exe --title "ResourceManager $env:GITHUB_REF_NAME" --notes-from-tag --verify-tag

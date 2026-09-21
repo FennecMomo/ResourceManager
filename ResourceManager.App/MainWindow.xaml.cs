@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly PeerClient client;
     private readonly DownloadManager downloader;
     private readonly ResourceCatalog catalog;
+    private readonly UpdateClient updateClient;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(15) };
     private readonly WinForms.NotifyIcon tray;
     private readonly MemoryStream iconStream;
@@ -33,6 +34,11 @@ public partial class MainWindow : Window
     private byte[]? pendingAvatar;
     private bool refreshing;
     private bool exiting;
+    private bool checkingUpdate;
+    private bool restartAfterUpdate;
+    private StagedUpdate? stagedUpdate;
+    private readonly bool startedWithWindows;
+    private readonly CancellationTokenSource updateCancellation = new();
 
     public ObservableCollection<PeerRow> Peers { get; } = [];
     public ObservableCollection<ResourceRow> RemoteResources { get; } = [];
@@ -40,20 +46,32 @@ public partial class MainWindow : Window
     public ObservableCollection<FavoriteRow> Favorites { get; } = [];
     public ObservableCollection<DownloadRow> Downloads { get; } = [];
 
-    public MainWindow()
+    public MainWindow(bool startedWithWindows = false)
     {
+        this.startedWithWindows = startedWithWindows;
         InitializeComponent();
+        if (startedWithWindows)
+        {
+            ShowActivated = false;
+            ShowInTaskbar = false;
+            WindowState = WindowState.Minimized;
+        }
         DataContext = this;
         node = new PeerNode(store);
         client = new PeerClient(store);
         downloader = new DownloadManager(store, client);
         catalog = new ResourceCatalog(store);
+        updateClient = new UpdateClient(store.DataDirectory);
+        updateClient.CleanupOldDownloads();
         var settings = store.GetSettings();
         NicknameBox.Text = settings.Profile.Nickname;
         ListenPortBox.Text = settings.ListenPort.ToString();
         PeerPortBox.Text = settings.ListenPort.ToString();
         CloseToTrayBox.IsChecked = settings.CloseToTray;
+        AutoUpdateBox.IsChecked = settings.AutoUpdate;
+        AutoStartBox.IsChecked = AutoStartManager.IsEnabled();
         DeviceIdText.Text = settings.Profile.DeviceId;
+        UpdateStatusText.Text = $"当前版本 v{AppVersion}";
         pendingAvatar = settings.Profile.Avatar;
         AvatarPreview.Source = AvatarImage(pendingAvatar);
         UpdateIdentity();
@@ -73,6 +91,7 @@ public partial class MainWindow : Window
             ContextMenuStrip = new WinForms.ContextMenuStrip()
         };
         tray.ContextMenuStrip.Items.Add("打开资源管理器", null, (_, _) => Dispatcher.Invoke(ShowWindow));
+        tray.ContextMenuStrip.Items.Add("检查更新", null, (_, _) => Dispatcher.Invoke(async () => await CheckForUpdatesAsync(true)));
         tray.ContextMenuStrip.Items.Add("退出并停止共享", null, (_, _) => Dispatcher.Invoke(async () => await ExitAsync()));
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowWindow);
         timer.Tick += async (_, _) => await RefreshAllAsync();
@@ -85,6 +104,13 @@ public partial class MainWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        if (startedWithWindows)
+        {
+            Hide();
+            ShowInTaskbar = true;
+            WindowState = WindowState.Normal;
+            ShowActivated = true;
+        }
         try
         {
             await node.StartAsync(store.GetSettings().ListenPort);
@@ -93,6 +119,8 @@ public partial class MainWindow : Window
         catch (Exception ex) { SetStatus($"监听失败：{ex.Message}。可在设置中更换端口后重试。"); }
         timer.Start();
         await RefreshAllAsync();
+        try { AutoStartManager.RefreshEnabledPath(); } catch { }
+        if (store.GetSettings().AutoUpdate && IsPackaged) _ = CheckForUpdatesAsync(false);
     }
 
     private void UpdateIdentity()
@@ -106,6 +134,19 @@ public partial class MainWindow : Window
     }
 
     private void SetStatus(string text) => StatusText.Text = text;
+    private static string AppVersion => Assembly.GetExecutingAssembly().GetName().Version is { } version
+        ? $"{version.Major}.{version.Minor}.{version.Build}" : "0.0.0";
+    private static bool IsPackaged
+    {
+        get
+        {
+#if PUBLISHED_SINGLE_FILE
+            return true;
+#else
+            return false;
+#endif
+        }
+    }
     private static string KindText(ResourceKind kind) => kind == ResourceKind.File ? "文件" : "文件夹";
     private static string ModeText(PublishMode mode) => mode == PublishMode.Copy ? "复制副本" : "引用原位置";
     private static string SizeText(long bytes) => bytes >= 1024L * 1024 * 1024 ? $"{bytes / (1024d * 1024 * 1024):0.0} GB" : bytes >= 1024 * 1024 ? $"{bytes / (1024d * 1024):0.0} MB" : bytes >= 1024 ? $"{bytes / 1024d:0.0} KB" : $"{bytes} B";
@@ -479,13 +520,77 @@ public partial class MainWindow : Window
 
     private void ClearAvatar_Click(object sender, RoutedEventArgs e) { pendingAvatar = null; AvatarPreview.Source = null; }
 
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e) => await CheckForUpdatesAsync(true);
+
+    private async Task CheckForUpdatesAsync(bool manual)
+    {
+        if (checkingUpdate)
+        {
+            if (manual) SetStatus("正在检查或下载更新，请稍候。");
+            return;
+        }
+        checkingUpdate = true;
+        CheckUpdateButton.IsEnabled = false;
+        if (!IsPackaged)
+        {
+            UpdateStatusText.Text = $"当前版本 v{AppVersion}；请使用打包后的 EXE 检查更新。";
+            checkingUpdate = false;
+            CheckUpdateButton.IsEnabled = true;
+            return;
+        }
+        UpdateStatusText.Text = "正在检查 GitHub 上的最新版本…";
+        try
+        {
+            var latest = await updateClient.GetLatestAsync(updateCancellation.Token);
+            if (latest is null)
+            {
+                UpdateStatusText.Text = "尚未发布可供更新的版本。";
+                if (manual) SetStatus("GitHub 尚未发布安装包。");
+                return;
+            }
+            var current = UpdateClient.ParseVersion(AppVersion);
+            if (latest.Version <= current)
+            {
+                UpdateStatusText.Text = $"当前已是最新版本 v{AppVersion}";
+                if (manual) SetStatus("当前已是最新版本。");
+                return;
+            }
+            UpdateStatusText.Text = $"发现 v{latest.Version}，正在下载并校验…";
+            var progress = new Progress<long>(bytes => UpdateStatusText.Text =
+                $"正在下载 v{latest.Version} · {bytes * 100d / latest.Size:0}%");
+            var package = await updateClient.DownloadAsync(latest, progress, updateCancellation.Token);
+            stagedUpdate = new StagedUpdate(package, latest.Sha256, latest.Version.ToString());
+            UpdateStatusText.Text = $"v{latest.Version} 已下载并校验，退出后安装。";
+            if (manual && System.Windows.MessageBox.Show(
+                    $"新版 v{latest.Version} 已准备好。\n\n现在退出共享、安装更新并重新启动吗？",
+                    "资源管理器更新", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+            {
+                restartAfterUpdate = true;
+                await ExitAsync();
+            }
+        }
+        catch (OperationCanceledException) when (exiting) { }
+        catch (Exception ex)
+        {
+            UpdateStatusText.Text = $"检查更新失败：{ex.Message}";
+            if (manual) ShowError("检查更新失败", ex);
+        }
+        finally
+        {
+            checkingUpdate = false;
+            CheckUpdateButton.IsEnabled = true;
+        }
+    }
+
     private async void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
+        var previousAutoStart = AutoStartManager.IsEnabled();
         try
         {
             if (!int.TryParse(ListenPortBox.Text, out var port)) throw new ArgumentException("监听端口无效。");
             var previousPort = store.GetSettings().ListenPort;
-            store.SaveSettings(NicknameBox.Text, pendingAvatar, port, CloseToTrayBox.IsChecked == true);
+            AutoStartManager.SetEnabled(AutoStartBox.IsChecked == true);
+            store.SaveSettings(NicknameBox.Text, pendingAvatar, port, CloseToTrayBox.IsChecked == true, AutoUpdateBox.IsChecked == true);
             UpdateIdentity();
             if (!node.IsRunning || previousPort != port)
             {
@@ -494,7 +599,12 @@ public partial class MainWindow : Window
             }
             SetStatus("设置已保存。设备资料会在下次状态检查时同步给其他电脑。");
         }
-        catch (Exception ex) { ShowError("保存设置失败", ex); }
+        catch (Exception ex)
+        {
+            try { AutoStartManager.SetEnabled(previousAutoStart); } catch { }
+            AutoStartBox.IsChecked = previousAutoStart;
+            ShowError("保存设置失败", ex);
+        }
     }
 
     private void ShowError(string title, Exception ex)
@@ -522,19 +632,37 @@ public partial class MainWindow : Window
         if (exiting) return;
         exiting = true;
         timer.Stop();
+        updateCancellation.Cancel();
         try { await node.StopAsync(); }
         finally
         {
             client.Dispose();
+            updateClient.Dispose();
+            updateCancellation.Dispose();
             tray.Visible = false;
             tray.Dispose();
             appIcon.Dispose();
             iconStream.Dispose();
+            if (stagedUpdate is not null && Environment.ProcessPath is not null)
+            {
+                Process.Start(new ProcessStartInfo(stagedUpdate.PackagePath)
+                {
+                    UseShellExecute = true,
+                    WorkingDirectory = Path.GetDirectoryName(stagedUpdate.PackagePath)!,
+                    ArgumentList =
+                    {
+                        "--apply-update", Environment.ProcessPath, stagedUpdate.Sha256,
+                        restartAfterUpdate ? "restart" : "no-restart"
+                    }
+                });
+            }
             Close();
             System.Windows.Application.Current.Shutdown();
         }
     }
 }
+
+internal sealed record StagedUpdate(string PackagePath, string Sha256, string Version);
 
 public sealed record PeerRow(PeerInfo Peer, string Status, ImageSource? Avatar)
 {
