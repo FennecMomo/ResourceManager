@@ -613,7 +613,14 @@ public partial class MainWindow : Window
         System.Windows.MessageBox.Show(ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
-    private void ShowWindow() { Show(); WindowState = WindowState.Normal; Activate(); }
+    internal void ShowWindow()
+    {
+        ShowInTaskbar = true;
+        ShowActivated = true;
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {

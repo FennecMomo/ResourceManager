@@ -7,6 +7,8 @@ namespace ResourceManager.App;
 
 public partial class App : System.Windows.Application
 {
+    private SingleInstanceCoordinator? singleInstance;
+
     private async void App_Startup(object sender, StartupEventArgs e)
     {
         if (e.Args.Length > 0 && e.Args[0] == "--apply-update")
@@ -15,10 +17,27 @@ public partial class App : System.Windows.Application
             Shutdown(code);
             return;
         }
+
+        singleInstance = new SingleInstanceCoordinator();
+        if (!singleInstance.IsPrimary)
+        {
+            if (!e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase))
+                await SingleInstanceCoordinator.ActivatePrimaryAsync();
+            Shutdown();
+            return;
+        }
+
         var startup = e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase);
         var window = new MainWindow(startup);
         MainWindow = window;
+        singleInstance.StartListening(() => Dispatcher.BeginInvoke(window.ShowWindow));
         window.Show();
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        singleInstance?.Dispose();
+        base.OnExit(e);
     }
 
     private static async Task<int> ApplyUpdateAsync(string[] args)
