@@ -1,7 +1,8 @@
-param(
+﻿param(
     [string]$SourceExe = (Join-Path $PSScriptRoot '..\dist\win-x64\ResourceManager.exe')
 )
 
+# Keep this script UTF-8 with BOM so Windows PowerShell 5.1 reads the Chinese shortcut name.
 $ErrorActionPreference = 'Stop'
 
 $source = (Resolve-Path -LiteralPath $SourceExe).Path
