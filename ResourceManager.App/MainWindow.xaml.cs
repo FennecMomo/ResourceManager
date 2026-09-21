@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -24,6 +25,8 @@ public partial class MainWindow : Window
     private readonly ResourceCatalog catalog;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(15) };
     private readonly WinForms.NotifyIcon tray;
+    private readonly MemoryStream iconStream;
+    private readonly System.Drawing.Icon appIcon;
     private readonly Dictionary<string, string> peerStatus = [];
     private readonly Dictionary<string, IReadOnlyList<RemoteResource>> peerCatalogs = [];
     private readonly HashSet<string> activeDownloads = [];
@@ -54,9 +57,17 @@ public partial class MainWindow : Window
         pendingAvatar = settings.Profile.Avatar;
         AvatarPreview.Source = AvatarImage(pendingAvatar);
         UpdateIdentity();
+        using var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("ResourceManager.AppIcon.ico")
+            ?? throw new InvalidOperationException("缺少应用图标资源。");
+        using var iconBytes = new MemoryStream();
+        source.CopyTo(iconBytes);
+        var data = iconBytes.ToArray();
+        iconStream = new MemoryStream(data);
+        appIcon = new System.Drawing.Icon(iconStream);
+        Icon = BitmapFrame.Create(new MemoryStream(data), BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
         tray = new WinForms.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = appIcon,
             Text = "资源管理器",
             Visible = true,
             ContextMenuStrip = new WinForms.ContextMenuStrip()
@@ -462,6 +473,8 @@ public partial class MainWindow : Window
             client.Dispose();
             tray.Visible = false;
             tray.Dispose();
+            appIcon.Dispose();
+            iconStream.Dispose();
             Close();
             System.Windows.Application.Current.Shutdown();
         }

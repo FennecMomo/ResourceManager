@@ -2,12 +2,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ResourceManager.Core\ResourceManager.Core.csproj" />
+    <EmbeddedResource Include="Assets\ResourceManager.ico" LogicalName="ResourceManager.AppIcon.ico" />
   </ItemGroup>
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>ResourceManager</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>慕沐</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -15,6 +16,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>Assets\ResourceManager.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>
