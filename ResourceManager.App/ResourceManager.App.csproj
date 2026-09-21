@@ -3,12 +3,13 @@
   <ItemGroup>
     <ProjectReference Include="..\ResourceManager.Core\ResourceManager.Core.csproj" />
     <EmbeddedResource Include="Assets\ResourceManager.ico" LogicalName="ResourceManager.AppIcon.ico" />
+    <Resource Include="Assets\ResourceManager.png" />
   </ItemGroup>
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>ResourceManager</AssemblyName>
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Authors>慕沐</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <TargetFramework>net10.0-windows</TargetFramework>

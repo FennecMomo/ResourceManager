@@ -80,6 +80,7 @@ public partial class MainWindow : Window
         RefreshPeersView();
         RefreshFavoritesView();
         RefreshDownloadsView();
+        UpdatePageHeader();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -139,9 +140,23 @@ public partial class MainWindow : Window
     {
         var selected = (RemoteGrid.SelectedItem as ResourceRow)?.Resource.Id;
         RemoteResources.Clear();
-        if (PeersGrid.SelectedItem is not PeerRow row) { PeerHeading.Text = "请选择一台设备"; UpdateActions(); return; }
+        if (PeersGrid.SelectedItem is not PeerRow row)
+        {
+            PeerHeading.Text = "选择一台设备";
+            PeerEmptyText.Text = "从左侧选择一台设备，查看对方的资源。";
+            UpdateActions();
+            return;
+        }
         PeerHeading.Text = $"{row.Nickname} 的资源 · {row.Status}";
-        if (row.Status != "在线" || !peerCatalogs.TryGetValue(row.Peer.DeviceId, out var resources)) { UpdateActions(); return; }
+        if (row.Status != "在线" || !peerCatalogs.TryGetValue(row.Peer.DeviceId, out var resources))
+        {
+            PeerEmptyText.Text = row.Status == "设备已变更"
+                ? "这个地址现在属于另一台设备。请检查连接地址。"
+                : "这台设备暂时无法连接。对方重新上线后会自动恢复。";
+            UpdateActions();
+            return;
+        }
+        PeerEmptyText.Text = "这台设备还没有发布资源。";
         foreach (var resource in resources)
             RemoteResources.Add(new ResourceRow(resource, resource.Name, KindText(resource.Kind), ModeText(resource.Mode), SizeText(resource.Size), resource.Available ? "可下载" : "原文件不可用"));
         RemoteGrid.SelectedItem = RemoteResources.FirstOrDefault(r => r.Resource.Id == selected);
@@ -150,12 +165,15 @@ public partial class MainWindow : Window
 
     private void RefreshLocalView()
     {
+        var selected = (LocalGrid.SelectedItem as LocalResourceRow)?.Resource.Id;
         LocalResources.Clear();
         foreach (var item in store.GetResources())
         {
             var info = catalog.Describe(item);
             LocalResources.Add(new LocalResourceRow(item, item.Name, KindText(item.Kind), ModeText(item.Mode), SizeText(info.Size), info.Available ? "可用" : "原文件不可用", item.SourcePath));
         }
+        LocalGrid.SelectedItem = LocalResources.FirstOrDefault(r => r.Resource.Id == selected);
+        UpdateActions();
     }
 
     private void RefreshFavoritesView()
@@ -193,6 +211,7 @@ public partial class MainWindow : Window
                 $"{SizeText(item.DownloadedBytes)} / {SizeText(item.TotalBytes)}", item.TargetPath, item.Error ?? ""));
         }
         DownloadsGrid.SelectedItem = Downloads.FirstOrDefault(d => d.Job.Id == selected);
+        UpdateActions();
     }
 
     private async Task RefreshAllAsync()
@@ -226,9 +245,33 @@ public partial class MainWindow : Window
         finally { refreshing = false; }
     }
 
+    private void Nav_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (Tabs is not null && NavList.SelectedIndex >= 0 && Tabs.SelectedIndex != NavList.SelectedIndex)
+            Tabs.SelectedIndex = NavList.SelectedIndex;
+    }
+
+    private void UpdatePageHeader()
+    {
+        var pages = new (string Title, string Subtitle)[]
+        {
+            ("设备", "连接同事的电脑，浏览他们分享的资源"),
+            ("我的发布", "决定哪些资源可以被其他设备看到"),
+            ("收藏", "常用资源的快捷入口和当前状态"),
+            ("下载", "查看传输进度，继续中断的任务"),
+            ("设置", "管理资料、连接方式和运行偏好")
+        };
+        var page = pages[Math.Clamp(Tabs.SelectedIndex, 0, pages.Length - 1)];
+        PageTitleText.Text = page.Title;
+        PageSubtitleText.Text = page.Subtitle;
+    }
+
     private async void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!ReferenceEquals(e.OriginalSource, Tabs) || !IsLoaded) return;
+        if (!ReferenceEquals(e.OriginalSource, Tabs) || NavList is null) return;
+        if (NavList.SelectedIndex != Tabs.SelectedIndex) NavList.SelectedIndex = Tabs.SelectedIndex;
+        UpdatePageHeader();
+        if (!IsLoaded) return;
         if (Tabs.SelectedIndex is 0 or 2) await RefreshAllAsync();
         if (Tabs.SelectedIndex == 1) RefreshLocalView();
         if (Tabs.SelectedIndex == 3) RefreshDownloadsView();
@@ -243,15 +286,26 @@ public partial class MainWindow : Window
 
     private void RemoteGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
     private void FavoritesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
+    private void LocalGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
+    private void DownloadsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
 
     private void UpdateActions()
     {
-        if (RemoteFavoriteButton is null || RemoteDownloadButton is null || FavoriteDownloadButton is null) return;
+        if (RemoteFavoriteButton is null || RemoteDownloadButton is null || FavoriteDownloadButton is null ||
+            RemovePeerButton is null || RemoveResourceButton is null || RemoveFavoriteButton is null || UpdateAddressButton is null ||
+            ResumeDownloadButton is null || OpenDownloadFolderButton is null) return;
         var remote = RemoteGrid.SelectedItem as ResourceRow;
         var peer = PeersGrid.SelectedItem as PeerRow;
         RemoteFavoriteButton.IsEnabled = remote is not null && peer?.Status == "在线";
         RemoteDownloadButton.IsEnabled = remote?.Resource.Available == true && peer?.Status == "在线";
         FavoriteDownloadButton.IsEnabled = (FavoritesGrid.SelectedItem as FavoriteRow)?.Status == "可下载";
+        RemovePeerButton.IsEnabled = peer is not null;
+        UpdateAddressButton.IsEnabled = peer is not null;
+        RemoveResourceButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
+        RemoveFavoriteButton.IsEnabled = FavoritesGrid.SelectedItem is FavoriteRow;
+        var download = DownloadsGrid.SelectedItem as DownloadRow;
+        ResumeDownloadButton.IsEnabled = download is not null && download.Job.Status != "已完成" && !activeDownloads.Contains(download.Job.Id);
+        OpenDownloadFolderButton.IsEnabled = download is not null;
     }
 
     private async void Connect_Click(object sender, RoutedEventArgs e)
@@ -307,9 +361,9 @@ public partial class MainWindow : Window
 
     private async Task PublishAsync(string path)
     {
-        var result = System.Windows.MessageBox.Show("选择发布方式：\n“是”=复制到软件管理目录\n“否”=引用原位置\n“取消”=不发布", "发布方式", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-        if (result == MessageBoxResult.Cancel) return;
-        var mode = result == MessageBoxResult.Yes ? PublishMode.Copy : PublishMode.Reference;
+        var dialog = new PublishModeDialog(Path.GetFileName(path)) { Owner = this, Icon = Icon };
+        if (dialog.ShowDialog() != true) return;
+        var mode = dialog.SelectedMode;
         try
         {
             SetStatus(mode == PublishMode.Copy ? "正在复制资源…" : "正在发布资源…");
@@ -377,6 +431,7 @@ public partial class MainWindow : Window
     private async Task StartDownloadAsync(string id)
     {
         if (!activeDownloads.Add(id)) return;
+        UpdateActions();
         try
         {
             var progress = new Progress<DownloadJob>(_ => RefreshDownloadsView());
@@ -485,9 +540,13 @@ public sealed record PeerRow(PeerInfo Peer, string Status, ImageSource? Avatar)
 {
     public string Nickname => Peer.Nickname;
     public string Ip => Peer.Ip;
+    public string Address => $"{Peer.Ip}:{Peer.Port}";
 }
 
 public sealed record ResourceRow(RemoteResource Resource, string Name, string Kind, string Mode, string Size, string Status);
 public sealed record LocalResourceRow(LocalResource Resource, string Name, string Kind, string Mode, string Size, string Status, string Path);
 public sealed record FavoriteRow(Favorite Favorite, string Name, string PeerName, string Kind, string Status);
-public sealed record DownloadRow(DownloadJob Job, string Name, string PeerName, string Status, string Progress, string Target, string Error);
+public sealed record DownloadRow(DownloadJob Job, string Name, string PeerName, string Status, string Progress, string Target, string Error)
+{
+    public double Percent => Job.TotalBytes > 0 ? Math.Clamp(Job.DownloadedBytes * 100d / Job.TotalBytes, 0, 100) : Job.Status == "已完成" ? 100 : 0;
+}
