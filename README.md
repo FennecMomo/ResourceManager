@@ -32,4 +32,4 @@ dotnet publish .\ResourceManager.App\ResourceManager.App.csproj -c Release -r wi
 
 ## 版本与许可
 
-当前版本为 `0.1.1`，图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows ICO。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
+当前版本为 `0.1.1`，版本号格式为 `系统.模块.修改`，Git 提交信息须带上对应的版本号。图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows ICO。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
