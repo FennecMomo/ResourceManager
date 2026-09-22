@@ -20,6 +20,7 @@ public partial class MainWindow : Window
 {
     private readonly NodeStore store = new();
     private readonly PeerNode node;
+    private readonly LanDiscoveryService discovery;
     private readonly PeerClient client;
     private readonly DownloadManager downloader;
     private readonly ResourceCatalog catalog;
@@ -30,7 +31,8 @@ public partial class MainWindow : Window
     private readonly System.Drawing.Icon appIcon;
     private readonly Dictionary<string, string> peerStatus = [];
     private readonly Dictionary<string, IReadOnlyList<RemoteResource>> peerCatalogs = [];
-    private readonly Dictionary<string, Task> activeDownloads = [];
+    private readonly Dictionary<string, ActiveDownload> activeDownloads = [];
+    private readonly HashSet<string> removingDownloads = [];
     private byte[]? pendingAvatar;
     private bool refreshing;
     private bool exiting;
@@ -59,6 +61,7 @@ public partial class MainWindow : Window
         }
         DataContext = this;
         node = new PeerNode(store);
+        discovery = new LanDiscoveryService(store);
         client = new PeerClient(store);
         downloader = new DownloadManager(store, client);
         catalog = new ResourceCatalog(store);
@@ -115,13 +118,31 @@ public partial class MainWindow : Window
         try
         {
             await node.StartAsync(store.GetSettings().ListenPort);
-            SetStatus($"共享服务已启动，端口 {node.Port}。");
+            var discoveryReady = await TryStartDiscoveryAsync();
+            SetStatus(discoveryReady
+                ? $"共享服务已启动，端口 {node.Port}；可通过局域网查找设备。"
+                : $"共享服务已启动，端口 {node.Port}；局域网自动发现不可用，可继续手动连接。");
         }
         catch (Exception ex) { SetStatus($"监听失败：{ex.Message}。可在设置中更换端口后重试。"); }
         timer.Start();
         await RefreshAllAsync();
         try { AutoStartManager.RefreshEnabledPath(); } catch { }
         if (store.GetSettings().AutoUpdate && IsPackaged) _ = CheckForUpdatesAsync(false);
+    }
+
+    private async Task<bool> TryStartDiscoveryAsync()
+    {
+        if (discovery.IsRunning) return true;
+        try
+        {
+            await discovery.StartAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("局域网发现服务启动失败", ex);
+            return false;
+        }
     }
 
     private void UpdateIdentity()
@@ -335,7 +356,7 @@ public partial class MainWindow : Window
     {
         if (RemoteFavoriteButton is null || RemoteDownloadButton is null || FavoriteDownloadButton is null ||
             RemovePeerButton is null || RemoveResourceButton is null || RemoveFavoriteButton is null || UpdateAddressButton is null ||
-            ResumeDownloadButton is null || OpenDownloadFolderButton is null) return;
+            ResumeDownloadButton is null || OpenDownloadFolderButton is null || RemoveDownloadButton is null) return;
         var remote = RemoteGrid.SelectedItem as ResourceRow;
         var peer = PeersGrid.SelectedItem as PeerRow;
         RemoteFavoriteButton.IsEnabled = remote is not null && peer?.Status == "在线";
@@ -346,8 +367,12 @@ public partial class MainWindow : Window
         RemoveResourceButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
         RemoveFavoriteButton.IsEnabled = FavoritesGrid.SelectedItem is FavoriteRow;
         var download = DownloadsGrid.SelectedItem as DownloadRow;
-        ResumeDownloadButton.IsEnabled = download is not null && download.Job.Status != "已完成" && !activeDownloads.ContainsKey(download.Job.Id);
-        OpenDownloadFolderButton.IsEnabled = download is not null;
+        var removing = download is not null && removingDownloads.Contains(download.Job.Id);
+        var active = download is not null && activeDownloads.ContainsKey(download.Job.Id);
+        ResumeDownloadButton.IsEnabled = download is not null && download.Job.Status != "已完成" && !active && !removing;
+        OpenDownloadFolderButton.IsEnabled = download is not null && !removing;
+        RemoveDownloadButton.IsEnabled = download is not null && !removing;
+        RemoveDownloadButton.Content = active ? "暂停并移除" : "移除任务";
     }
 
     private async void Connect_Click(object sender, RoutedEventArgs e)
@@ -361,6 +386,51 @@ public partial class MainWindow : Window
             PeersGrid.SelectedItem = Peers.FirstOrDefault(p => p.Peer.DeviceId == peer.DeviceId);
         }
         catch (Exception ex) { ShowError("连接失败", ex); }
+    }
+
+    private async void DiscoverPeers_Click(object sender, RoutedEventArgs e)
+    {
+        DiscoverPeersButton.IsEnabled = false;
+        DiscoverPeersButton.Content = "正在查找…";
+        SetStatus("正在查找同一局域网内的设备…");
+        try
+        {
+            var found = await discovery.DiscoverAsync(TimeSpan.FromSeconds(2), updateCancellation.Token);
+            if (found.Count == 0)
+            {
+                SetStatus("没有找到其他设备。请确认对方软件正在运行，并允许公司网络访问。");
+                return;
+            }
+
+            var attempts = found.Select(async item =>
+            {
+                try
+                {
+                    var peer = await client.ConnectAsync(item.Ip, item.Port, item.DeviceId, updateCancellation.Token);
+                    return (Peer: peer, Error: (Exception?)null);
+                }
+                catch (Exception ex) { return (Peer: (PeerInfo?)null, Error: ex); }
+            });
+            var results = await Task.WhenAll(attempts);
+            var connected = results.Where(result => result.Peer is not null).Select(result => result.Peer!).ToArray();
+            await RefreshAllAsync();
+            if (connected.Length == 1)
+                PeersGrid.SelectedItem = Peers.FirstOrDefault(row => row.Peer.DeviceId == connected[0].DeviceId);
+            var failed = results.Length - connected.Length;
+            SetStatus(failed == 0
+                ? $"找到并连接了 {connected.Length} 台设备。"
+                : $"找到 {results.Length} 台设备，已连接 {connected.Length} 台，{failed} 台连接失败。");
+        }
+        catch (OperationCanceledException) when (exiting) { }
+        catch (Exception ex) { ShowError("查找设备失败", ex); }
+        finally
+        {
+            if (!exiting)
+            {
+                DiscoverPeersButton.Content = "查找局域网设备";
+                DiscoverPeersButton.IsEnabled = true;
+            }
+        }
     }
 
     private async void UpdateAddress_Click(object sender, RoutedEventArgs e)
@@ -473,24 +543,26 @@ public partial class MainWindow : Window
     private void QueueDownload(string id)
     {
         if (activeDownloads.ContainsKey(id)) return;
-        var task = StartDownloadAsync(id);
-        activeDownloads.Add(id, task);
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(downloadCancellation.Token);
+        var active = new ActiveDownload(cancellation);
+        activeDownloads.Add(id, active);
+        active.Task = StartDownloadAsync(id, cancellation.Token);
         UpdateActions();
     }
 
-    private async Task StartDownloadAsync(string id)
+    private async Task StartDownloadAsync(string id, CancellationToken cancellationToken)
     {
         try
         {
             var progress = new Progress<DownloadJob>(UpdateDownloadProgressSafely);
             await Task.Run(
-                () => downloader.RunAsync(id, progress, downloadCancellation.Token),
-                downloadCancellation.Token);
-            if (!exiting) SetStatus("下载完成。本地文件在发布者离线时仍可使用。");
+                () => downloader.RunAsync(id, progress, cancellationToken),
+                cancellationToken);
+            if (!exiting && !removingDownloads.Contains(id)) SetStatus("下载完成。本地文件在发布者离线时仍可使用。");
         }
-        catch (OperationCanceledException) when (downloadCancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            if (!exiting) SetStatus("下载已暂停，可在下载页继续。");
+            if (!exiting && !removingDownloads.Contains(id)) SetStatus("下载已暂停，可在下载页继续。");
         }
         catch (Exception ex)
         {
@@ -499,7 +571,7 @@ public partial class MainWindow : Window
         }
         finally
         {
-            activeDownloads.Remove(id);
+            if (activeDownloads.Remove(id, out var active)) active.Cancellation.Dispose();
             if (!exiting)
             {
                 try { RefreshDownloadsView(); }
@@ -510,7 +582,7 @@ public partial class MainWindow : Window
 
     private void UpdateDownloadProgressSafely(DownloadJob job)
     {
-        if (exiting) return;
+        if (exiting || removingDownloads.Contains(job.Id)) return;
         try
         {
             var index = Downloads.ToList().FindIndex(row => row.Job.Id == job.Id);
@@ -534,6 +606,40 @@ public partial class MainWindow : Window
     {
         if (DownloadsGrid.SelectedItem is not DownloadRow row || row.Job.Status == "已完成") return;
         QueueDownload(row.Job.Id);
+    }
+
+    private async void RemoveDownload_Click(object sender, RoutedEventArgs e)
+    {
+        if (DownloadsGrid.SelectedItem is not DownloadRow row || removingDownloads.Contains(row.Job.Id)) return;
+        var active = activeDownloads.GetValueOrDefault(row.Job.Id);
+        var completed = row.Job.Status == "已完成";
+        var message = completed
+            ? $"从下载列表移除“{row.Name}”？\n\n已经下载的文件会保留在原位置。"
+            : active is not null
+                ? $"暂停并移除“{row.Name}”？\n\n已下载的临时内容会一起删除。"
+                : $"移除“{row.Name}”？\n\n已下载的临时内容会一起删除。";
+        if (System.Windows.MessageBox.Show(message, "确认移除下载任务", MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+
+        removingDownloads.Add(row.Job.Id);
+        UpdateActions();
+        try
+        {
+            if (active is not null)
+            {
+                active.Cancellation.Cancel();
+                await active.Task;
+            }
+            var latest = store.GetDownload(row.Job.Id) ?? row.Job;
+            downloader.RemoveJob(row.Job.Id, latest.Status != "已完成");
+            SetStatus(latest.Status == "已完成" ? "下载记录已移除，本地文件已保留。" : "下载任务和临时内容已移除。");
+        }
+        catch (Exception ex) { ShowError("移除下载任务失败", ex); }
+        finally
+        {
+            removingDownloads.Remove(row.Job.Id);
+            RefreshDownloadsView();
+        }
     }
 
     private void OpenDownloadFolder_Click(object sender, RoutedEventArgs e)
@@ -641,10 +747,14 @@ public partial class MainWindow : Window
             UpdateIdentity();
             if (!node.IsRunning || previousPort != port)
             {
+                await discovery.StopAsync();
                 await node.StopAsync();
                 await node.StartAsync(port);
             }
-            SetStatus("设置已保存。设备资料会在下次状态检查时同步给其他电脑。");
+            var discoveryReady = await TryStartDiscoveryAsync();
+            SetStatus(discoveryReady
+                ? "设置已保存。设备资料会在下次状态检查时同步给其他电脑。"
+                : "设置已保存，但局域网自动发现不可用；仍可使用 IP 地址手动连接。");
         }
         catch (Exception ex)
         {
@@ -688,13 +798,17 @@ public partial class MainWindow : Window
         timer.Stop();
         updateCancellation.Cancel();
         downloadCancellation.Cancel();
-        var downloads = activeDownloads.Values.ToArray();
+        var downloads = activeDownloads.Values.Select(active => active.Task).ToArray();
         if (downloads.Length > 0)
         {
             try { await Task.WhenAll(downloads).WaitAsync(TimeSpan.FromSeconds(5)); }
             catch (Exception ex) when (ex is OperationCanceledException or TimeoutException) { }
         }
-        try { await node.StopAsync(); }
+        try
+        {
+            await discovery.StopAsync();
+            await node.StopAsync();
+        }
         finally
         {
             client.Dispose();
@@ -725,6 +839,12 @@ public partial class MainWindow : Window
 }
 
 internal sealed record StagedUpdate(string PackagePath, string Sha256, string Version);
+
+internal sealed class ActiveDownload(CancellationTokenSource cancellation)
+{
+    public CancellationTokenSource Cancellation { get; } = cancellation;
+    public Task Task { get; set; } = Task.CompletedTask;
+}
 
 public sealed record PeerRow(PeerInfo Peer, string Status, ImageSource? Avatar)
 {

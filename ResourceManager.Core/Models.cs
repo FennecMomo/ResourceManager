@@ -10,6 +10,7 @@ public enum PublishMode { Reference, Copy }
 
 public sealed record NodeProfile(string DeviceId, string Nickname, byte[]? Avatar);
 public sealed record PeerHello(string DeviceId, string Nickname, int Port, byte[]? Avatar);
+public sealed record DiscoveredPeer(string DeviceId, string Ip, int Port, string Nickname);
 public sealed record PeerInfo(string DeviceId, string Ip, int Port, string Nickname, byte[]? Avatar, DateTimeOffset? LastSeenUtc);
 public sealed record LocalResource(string Id, string Name, ResourceKind Kind, PublishMode Mode, string SourcePath, DateTimeOffset PublishedUtc);
 public sealed record RemoteResource(string Id, string Name, ResourceKind Kind, PublishMode Mode, long Size, DateTimeOffset ModifiedUtc, bool Available);
@@ -21,5 +22,6 @@ public sealed record AppSettings(NodeProfile Profile, int ListenPort, bool Close
 public static class NodeDefaults
 {
     public const int Port = 37642;
+    public const int DiscoveryPort = 37643;
     public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ResourceManager");
 }

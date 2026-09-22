@@ -9,6 +9,67 @@ namespace ResourceManager.Tests;
 public sealed class PeerIntegrationTests
 {
     [Fact]
+    public async Task LanDiscovery_FindsAnotherRunningDevice()
+    {
+        using var space = new TestSpace();
+        var scannerStore = new NodeStore(space.PathFor("scanner"));
+        var responderStore = new NodeStore(space.PathFor("responder"));
+        responderStore.SaveSettings("设计部电脑", null, 40123, true);
+        var discoveryPort = FreeUdpPort();
+        await using var responder = new LanDiscoveryService(responderStore, discoveryPort);
+        await using var scanner = new LanDiscoveryService(scannerStore, discoveryPort);
+        await responder.StartAsync();
+
+        var peers = await scanner.DiscoverAsync(TimeSpan.FromMilliseconds(500),
+            broadcastAddresses: [IPAddress.Loopback]);
+
+        var peer = Assert.Single(peers);
+        Assert.Equal(responderStore.GetSettings().Profile.DeviceId, peer.DeviceId);
+        Assert.Equal("设计部电脑", peer.Nickname);
+        Assert.Equal("127.0.0.1", peer.Ip);
+        Assert.Equal(40123, peer.Port);
+    }
+
+    [Fact]
+    public void RemovingDownload_DeletesPartialData_ButKeepsCompletedFile()
+    {
+        using var space = new TestSpace();
+        var store = new NodeStore(space.PathFor("store"));
+        using var client = new PeerClient(store);
+        var downloads = new DownloadManager(store, client);
+
+        var partialTarget = space.PathFor("output", "partial.zip");
+        Directory.CreateDirectory(Path.GetDirectoryName(partialTarget)!);
+        File.WriteAllText(partialTarget + ".rm-part", "partial");
+        File.WriteAllText(partialTarget + ".rm-etag", "tag");
+        var partial = new DownloadJob("partial", "peer", "resource", "partial.zip", ResourceKind.File,
+            partialTarget, "已暂停", 7, 100, null);
+        store.SaveDownload(partial);
+        downloads.RemoveJob(partial.Id, true);
+        Assert.Null(store.GetDownload(partial.Id));
+        Assert.False(File.Exists(partialTarget + ".rm-part"));
+        Assert.False(File.Exists(partialTarget + ".rm-etag"));
+
+        var completedTarget = space.Write("completed.zip", "complete");
+        var completed = new DownloadJob("completed", "peer", "resource", "completed.zip", ResourceKind.File,
+            completedTarget, "已完成", 8, 8, null);
+        store.SaveDownload(completed);
+        downloads.RemoveJob(completed.Id, false);
+        Assert.Null(store.GetDownload(completed.Id));
+        Assert.True(File.Exists(completedTarget));
+
+        var folderTarget = space.PathFor("folder-download");
+        Directory.CreateDirectory(folderTarget);
+        File.WriteAllText(Path.Combine(folderTarget, "received.txt"), "partial folder");
+        var folder = new DownloadJob("folder", "peer", "resource", "folder-download", ResourceKind.Folder,
+            folderTarget, "已中断", 14, 100, null);
+        store.SaveDownload(folder);
+        downloads.RemoveJob(folder.Id, true);
+        Assert.Null(store.GetDownload(folder.Id));
+        Assert.False(Directory.Exists(folderTarget));
+    }
+
+    [Fact]
     public async Task Peers_ExchangeCatalog_AndDownloadFileAndFolder()
     {
         using var space = new TestSpace();
@@ -191,6 +252,12 @@ public sealed class PeerIntegrationTests
         return port;
     }
 
+    private static int FreeUdpPort()
+    {
+        using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        return ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
+    }
+
     private sealed class RecordingSynchronizationContext : SynchronizationContext
     {
         private int postCount;
@@ -206,7 +273,7 @@ public sealed class PeerIntegrationTests
     private sealed class TestSpace : IDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), "ResourceManagerTests", Guid.NewGuid().ToString("N"));
-        public string PathFor(string name) => Path.Combine(root, name);
+        public string PathFor(params string[] names) => Path.Combine([root, .. names]);
         public string Write(string name, string text)
         {
             Directory.CreateDirectory(root);

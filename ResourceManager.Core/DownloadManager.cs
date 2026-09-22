@@ -74,6 +74,25 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
         }
     }
 
+    public void RemoveJob(string jobId, bool deleteLocalData)
+    {
+        var job = store.GetDownload(jobId);
+        if (job is null) return;
+        if (deleteLocalData) DeleteLocalData(job);
+        store.RemoveDownload(jobId);
+    }
+
+    private static void DeleteLocalData(DownloadJob job)
+    {
+        if (job.Kind == ResourceKind.Folder)
+        {
+            if (Directory.Exists(job.TargetPath)) Directory.Delete(job.TargetPath, true);
+            return;
+        }
+        foreach (var path in new[] { job.TargetPath, job.TargetPath + ".rm-part", job.TargetPath + ".rm-etag" })
+            if (File.Exists(path)) File.Delete(path);
+    }
+
     private static string TargetFor(DownloadJob job, RemoteFile entry)
     {
         if (job.Kind == ResourceKind.File)

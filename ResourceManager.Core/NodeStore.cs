@@ -293,4 +293,14 @@ public sealed class NodeStore
             command.ExecuteNonQuery();
         }
     }
+
+    public void RemoveDownload(string id)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, "DELETE FROM downloads WHERE id=$id", "$id", id);
+            command.ExecuteNonQuery();
+        }
+    }
 }
