@@ -22,6 +22,9 @@ public partial class MainWindow : Window
     private readonly PeerNode node;
     private readonly LanDiscoveryService discovery;
     private readonly PeerClient client;
+    private readonly UpnpGatewayClient upnpGatewayClient;
+    private readonly UpnpPortMappingManager mappingManager;
+    private readonly GatewayDiscoveryService gatewayDiscovery;
     private readonly DownloadManager downloader;
     private readonly ResourceCatalog catalog;
     private readonly UpdateClient updateClient;
@@ -42,12 +45,18 @@ public partial class MainWindow : Window
     private readonly bool startedWithWindows;
     private readonly CancellationTokenSource updateCancellation = new();
     private readonly CancellationTokenSource downloadCancellation = new();
+    private CancellationTokenSource? gatewayRefreshCancellation;
+    private DateTimeOffset nextMappingMaintenance = DateTimeOffset.MinValue;
+    private DateTimeOffset nextRouterInfoRefresh = DateTimeOffset.MinValue;
+    private bool routerInfoRefreshing;
+    private string? currentRouterWanIp;
 
     public ObservableCollection<PeerRow> Peers { get; } = [];
     public ObservableCollection<ResourceRow> RemoteResources { get; } = [];
     public ObservableCollection<LocalResourceRow> LocalResources { get; } = [];
     public ObservableCollection<FavoriteRow> Favorites { get; } = [];
     public ObservableCollection<DownloadRow> Downloads { get; } = [];
+    public ObservableCollection<GatewayRow> Gateways { get; } = [];
 
     public MainWindow(bool startedWithWindows = false)
     {
@@ -60,9 +69,12 @@ public partial class MainWindow : Window
             WindowState = WindowState.Minimized;
         }
         DataContext = this;
-        node = new PeerNode(store);
         discovery = new LanDiscoveryService(store);
+        upnpGatewayClient = new UpnpGatewayClient();
+        mappingManager = new UpnpPortMappingManager(store, upnpGatewayClient);
+        node = new PeerNode(store, discovery, mappingManager);
         client = new PeerClient(store);
+        gatewayDiscovery = new GatewayDiscoveryService(store, client);
         downloader = new DownloadManager(store, client);
         catalog = new ResourceCatalog(store);
         updateClient = new UpdateClient(store.DataDirectory);
@@ -98,9 +110,10 @@ public partial class MainWindow : Window
         tray.ContextMenuStrip.Items.Add("检查更新", null, (_, _) => Dispatcher.Invoke(async () => await CheckForUpdatesAsync(true)));
         tray.ContextMenuStrip.Items.Add("退出并停止共享", null, (_, _) => Dispatcher.Invoke(async () => await ExitAsync()));
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowWindow);
-        timer.Tick += async (_, _) => await RefreshAllAsync();
+        timer.Tick += async (_, _) => await TimerTickAsync();
         RefreshLocalView();
         RefreshPeersView();
+        RefreshGatewaysView();
         RefreshFavoritesView();
         RefreshDownloadsView();
         UpdatePageHeader();
@@ -126,6 +139,8 @@ public partial class MainWindow : Window
         catch (Exception ex) { SetStatus($"监听失败：{ex.Message}。可在设置中更换端口后重试。"); }
         timer.Start();
         await RefreshAllAsync();
+        await RefreshRouterInfoAsync();
+        await MaintainMappingsAsync();
         try { AutoStartManager.RefreshEnabledPath(); } catch { }
         if (store.GetSettings().AutoUpdate && IsPackaged) _ = CheckForUpdatesAsync(false);
     }
@@ -156,6 +171,26 @@ public partial class MainWindow : Window
     }
 
     private void SetStatus(string text) => StatusText.Text = text;
+
+    private async Task TimerTickAsync()
+    {
+        await RefreshAllAsync();
+        if (DateTimeOffset.UtcNow >= nextRouterInfoRefresh) await RefreshRouterInfoAsync();
+        if (DateTimeOffset.UtcNow >= nextMappingMaintenance) await MaintainMappingsAsync();
+    }
+
+    private async Task MaintainMappingsAsync()
+    {
+        nextMappingMaintenance = DateTimeOffset.UtcNow.AddMinutes(5);
+        try
+        {
+            await mappingManager.MaintainMappingsAsync(updateCancellation.Token);
+            await RefreshRouterInfoAsync();
+        }
+        catch (OperationCanceledException) when (exiting) { }
+        catch (Exception ex) { AppLog.Write("维护 UPnP 映射失败", ex); }
+    }
+
     private static string AppVersion => Assembly.GetExecutingAssembly().GetName().Version is { } version
         ? $"{version.Major}.{version.Minor}.{version.Build}" : "0.0.0";
     private static bool IsPackaged
@@ -194,9 +229,31 @@ public partial class MainWindow : Window
         var selected = (PeersGrid.SelectedItem as PeerRow)?.Peer.DeviceId;
         Peers.Clear();
         foreach (var peer in store.GetPeers())
-            Peers.Add(new PeerRow(peer, peerStatus.GetValueOrDefault(peer.DeviceId, "未检查"), AvatarImage(peer.Avatar)));
+        {
+            var endpoint = store.GetPeerEndpoints(peer.DeviceId)
+                .FirstOrDefault(item => item.Ip == peer.Ip && item.Port == peer.Port && item.Source != "DeviceChanged");
+            var gateway = endpoint?.GatewayId is null
+                ? null
+                : store.GetGateways().FirstOrDefault(item => item.Id == endpoint.GatewayId);
+            var source = endpoint?.Kind == PeerEndpointKind.Gateway
+                ? $"{gateway?.Name ?? "路由器入口"} · {peer.Port}"
+                : endpoint is null ? "入口已移除" : "局域网直连";
+            Peers.Add(new PeerRow(peer, peerStatus.GetValueOrDefault(peer.DeviceId, "未检查"),
+                AvatarImage(peer.Avatar), source));
+        }
         PeersGrid.SelectedItem = Peers.FirstOrDefault(p => p.Peer.DeviceId == selected);
         RefreshSelectedResources();
+    }
+
+    private void RefreshGatewaysView(string? selectId = null)
+    {
+        var selected = selectId ?? (GatewayList?.SelectedItem as GatewayRow)?.Gateway.Id;
+        Gateways.Clear();
+        foreach (var gateway in store.GetGateways())
+            Gateways.Add(new GatewayRow(gateway, gateway.Name, gateway.WanIp,
+                $"端口 {gateway.PortStart}–{gateway.PortEnd}", gateway.LastStatus ?? "未检查"));
+        if (GatewayList is null) return;
+        GatewayList.SelectedItem = Gateways.FirstOrDefault(item => item.Gateway.Id == selected);
     }
 
     private void RefreshSelectedResources()
@@ -285,21 +342,35 @@ public partial class MainWindow : Window
         {
             foreach (var peer in store.GetPeers())
             {
-                try
+                var candidates = store.GetPeerEndpoints(peer.DeviceId).Where(item => item.Source != "DeviceChanged")
+                    .GroupBy(item => (item.Ip, item.Port))
+                    .Select(group => group.OrderByDescending(item => item.LastSuccessUtc).First())
+                    .OrderBy(item => item.Kind == PeerEndpointKind.Direct ? 0 : 1)
+                    .ThenByDescending(item => item.LastSuccessUtc)
+                    .ToArray();
+                var connected = false;
+                foreach (var endpoint in candidates)
                 {
-                    peerCatalogs[peer.DeviceId] = await client.GetResourcesAsync(peer);
-                    peerStatus[peer.DeviceId] = "在线";
+                    var candidate = peer with { Ip = endpoint.Ip, Port = endpoint.Port };
+                    try
+                    {
+                        peerCatalogs[peer.DeviceId] = await client.GetResourcesAsync(candidate);
+                        peerStatus[peer.DeviceId] = "在线";
+                        connected = true;
+                        break;
+                    }
+                    catch (InvalidOperationException ex) when (ex.Message.Contains("另一台设备") ||
+                                                                 ex.Message.Contains("另一台"))
+                    {
+                        store.MarkEndpointDeviceChanged(endpoint);
+                        peerStatus[peer.DeviceId] = "设备已变更";
+                    }
+                    catch { }
                 }
-                catch (InvalidOperationException ex) when (ex.Message.Contains("另一台设备"))
-                {
-                    peerStatus[peer.DeviceId] = "设备已变更";
-                    peerCatalogs.Remove(peer.DeviceId);
-                }
-                catch
-                {
+                if (connected) continue;
+                if (peerStatus.GetValueOrDefault(peer.DeviceId) != "设备已变更")
                     peerStatus[peer.DeviceId] = "离线";
-                    peerCatalogs.Remove(peer.DeviceId);
-                }
+                peerCatalogs.Remove(peer.DeviceId);
             }
             RefreshPeersView();
             RefreshFavoritesView();
@@ -338,6 +409,7 @@ public partial class MainWindow : Window
         if (Tabs.SelectedIndex is 0 or 2) await RefreshAllAsync();
         if (Tabs.SelectedIndex == 1) RefreshLocalView();
         if (Tabs.SelectedIndex == 3) RefreshDownloadsView();
+        if (Tabs.SelectedIndex == 4) await RefreshRouterInfoAsync();
     }
 
     private void PeersGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -431,6 +503,184 @@ public partial class MainWindow : Window
                 DiscoverPeersButton.IsEnabled = true;
             }
         }
+    }
+
+    private async void AddGateway_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var name = GatewayNameBox.Text.Trim();
+            var ip = GatewayIpBox.Text.Trim();
+            var existing = store.GetGateways().FirstOrDefault(item => item.WanIp == ip);
+            var gateway = store.SaveGateway(name, ip, existing?.Id);
+            RefreshGatewaysView(gateway.Id);
+            await RefreshGatewayAsync(gateway);
+        }
+        catch (Exception ex) { ShowError("添加路由器入口失败", ex); }
+    }
+
+    private async void SaveGatewayAddress_Click(object sender, RoutedEventArgs e)
+    {
+        if (GatewayList.SelectedItem is not GatewayRow row)
+        {
+            SetStatus("请先选择一个路由器入口。");
+            return;
+        }
+        try
+        {
+            var gateway = store.SaveGateway(GatewayNameBox.Text, GatewayIpBox.Text, row.Gateway.Id);
+            RefreshGatewaysView(gateway.Id);
+            await RefreshGatewayAsync(gateway);
+        }
+        catch (Exception ex) { ShowError("修改路由器入口失败", ex); }
+    }
+
+    private async void RefreshGateway_Click(object sender, RoutedEventArgs e)
+    {
+        if (gatewayRefreshCancellation is not null)
+        {
+            gatewayRefreshCancellation.Cancel();
+            return;
+        }
+        if (GatewayList.SelectedItem is not GatewayRow row)
+        {
+            SetStatus("请先选择一个路由器入口。");
+            return;
+        }
+        await RefreshGatewayAsync(row.Gateway);
+    }
+
+    private async Task RefreshGatewayAsync(GatewayInfo gateway)
+    {
+        gatewayRefreshCancellation?.Cancel();
+        gatewayRefreshCancellation?.Dispose();
+        var refreshCancellation = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token);
+        gatewayRefreshCancellation = refreshCancellation;
+        GatewayRefreshButton.Content = "取消扫描";
+        GatewayRefreshButton.IsEnabled = true;
+        GatewayAddButton.IsEnabled = false;
+        GatewaySaveButton.IsEnabled = false;
+        GatewayRemoveButton.IsEnabled = false;
+        try
+        {
+            var progress = new Progress<string>(message =>
+            {
+                SetStatus(message + "…");
+                GatewayProgressText.Text = message;
+            });
+            var result = await gatewayDiscovery.RefreshAsync(gateway, progress, refreshCancellation.Token);
+            SetStatus(result.Status);
+            GatewayProgressText.Text = result.Status;
+            RefreshGatewaysView(gateway.Id);
+            await RefreshAllAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("路由器入口扫描已取消。");
+            GatewayProgressText.Text = "扫描已取消";
+        }
+        catch (Exception ex) { ShowError("刷新路由器入口失败", ex); }
+        finally
+        {
+            refreshCancellation.Dispose();
+            if (ReferenceEquals(gatewayRefreshCancellation, refreshCancellation))
+            {
+                gatewayRefreshCancellation = null;
+                GatewayRefreshButton.Content = "刷新";
+                GatewayAddButton.IsEnabled = true;
+                GatewaySaveButton.IsEnabled = true;
+                GatewayRemoveButton.IsEnabled = true;
+            }
+        }
+    }
+
+    private void GatewayList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (GatewayList.SelectedItem is not GatewayRow row) return;
+        GatewayNameBox.Text = row.Gateway.Name;
+        GatewayIpBox.Text = row.Gateway.WanIp;
+        GatewayProgressText.Text = row.Gateway.LastStatus ?? "未检查";
+    }
+
+    private void RemoveGateway_Click(object sender, RoutedEventArgs e)
+    {
+        if (GatewayList.SelectedItem is not GatewayRow row) return;
+        var affected = store.GetPeerEndpoints(gatewayId: row.Gateway.Id)
+            .Select(item => item.DeviceId).Distinct(StringComparer.Ordinal).ToArray();
+        store.RemoveGateway(row.Gateway.Id);
+        foreach (var deviceId in affected)
+        {
+            peerStatus[deviceId] = "离线";
+            peerCatalogs.Remove(deviceId);
+        }
+        RefreshGatewaysView();
+        RefreshPeersView();
+        SetStatus("已移除本机保存的路由器入口和端点缓存。");
+    }
+
+    private async Task RefreshRouterInfoAsync()
+    {
+        if (routerInfoRefreshing || exiting) return;
+        routerInfoRefreshing = true;
+        nextRouterInfoRefresh = DateTimeOffset.UtcNow.AddMinutes(1);
+        try
+        {
+            var router = await mappingManager.GetCurrentRouterAsync(updateCancellation.Token);
+            if (router is null)
+            {
+                currentRouterWanIp = null;
+                RouterAdapterText.Text = "无法确定";
+                RouterLanText.Text = "未发现支持 UPnP IGD 的路由器";
+                RouterWanText.Text = "无法读取，请在路由器信息页查看 WAN IP";
+                RouterUpnpText.Text = "未检测到";
+                RouterMappingText.Text = "尚未分配";
+                CopyRouterWanButton.IsEnabled = false;
+                RemoveRouterMappingButton.IsEnabled = false;
+                return;
+            }
+
+            currentRouterWanIp = string.IsNullOrWhiteSpace(router.WanIp) ? null : router.WanIp;
+            RouterAdapterText.Text = router.AdapterName;
+            RouterLanText.Text = $"{router.RouterLanIp}（本机 {router.LanIp}）";
+            RouterWanText.Text = currentRouterWanIp ?? "无法读取，请在路由器信息页查看 WAN IP";
+            RouterUpnpText.Text = router.UpnpAvailable ? "已开启" : "不可用";
+            var mapping = store.GetLocalPortMappings().FirstOrDefault(item => item.RouterUdn == router.RouterUdn);
+            RouterMappingText.Text = mapping is null
+                ? "尚未分配（只有外部设备请求扩展发现后才会申请）"
+                : $"{mapping.ExternalPort} → {mapping.LanIp}:{mapping.InternalPort} · 长期保留";
+            CopyRouterWanButton.IsEnabled = currentRouterWanIp is not null;
+            RemoveRouterMappingButton.IsEnabled = mapping is not null;
+        }
+        catch (OperationCanceledException) when (exiting) { }
+        catch (Exception ex)
+        {
+            AppLog.Write("读取当前路由器信息失败", ex);
+            RouterWanText.Text = "无法读取，请在路由器信息页查看 WAN IP";
+            RouterUpnpText.Text = "读取失败";
+        }
+        finally { routerInfoRefreshing = false; }
+    }
+
+    private void CopyRouterWan_Click(object sender, RoutedEventArgs e)
+    {
+        if (currentRouterWanIp is null) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(currentRouterWanIp);
+            SetStatus($"已复制路由器外部入口 {currentRouterWanIp}，可提供给路由器外的设备。");
+        }
+        catch (Exception ex) { ShowError("复制外部入口失败", ex); }
+    }
+
+    private async void RemoveRouterMapping_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var removed = await mappingManager.RemoveCurrentMappingAsync(updateCancellation.Token);
+            SetStatus(removed ? "已删除本机外部映射。" : "当前路由器没有本机映射。");
+            await RefreshRouterInfoAsync();
+        }
+        catch (Exception ex) { ShowError("删除外部映射失败", ex); }
     }
 
     private async void UpdateAddress_Click(object sender, RoutedEventArgs e)
@@ -752,6 +1002,7 @@ public partial class MainWindow : Window
                 await node.StartAsync(port);
             }
             var discoveryReady = await TryStartDiscoveryAsync();
+            if (previousPort != port) await MaintainMappingsAsync();
             SetStatus(discoveryReady
                 ? "设置已保存。设备资料会在下次状态检查时同步给其他电脑。"
                 : "设置已保存，但局域网自动发现不可用；仍可使用 IP 地址手动连接。");
@@ -796,6 +1047,7 @@ public partial class MainWindow : Window
         if (exiting) return;
         exiting = true;
         timer.Stop();
+        gatewayRefreshCancellation?.Cancel();
         updateCancellation.Cancel();
         downloadCancellation.Cancel();
         var downloads = activeDownloads.Values.Select(active => active.Task).ToArray();
@@ -807,11 +1059,13 @@ public partial class MainWindow : Window
         try
         {
             await discovery.StopAsync();
-            await node.StopAsync();
+            await node.DisposeAsync();
         }
         finally
         {
+            gatewayRefreshCancellation?.Dispose();
             client.Dispose();
+            upnpGatewayClient.Dispose();
             updateClient.Dispose();
             updateCancellation.Dispose();
             downloadCancellation.Dispose();
@@ -846,12 +1100,14 @@ internal sealed class ActiveDownload(CancellationTokenSource cancellation)
     public Task Task { get; set; } = Task.CompletedTask;
 }
 
-public sealed record PeerRow(PeerInfo Peer, string Status, ImageSource? Avatar)
+public sealed record PeerRow(PeerInfo Peer, string Status, ImageSource? Avatar, string Source)
 {
     public string Nickname => Peer.Nickname;
     public string Ip => Peer.Ip;
     public string Address => $"{Peer.Ip}:{Peer.Port}";
 }
+
+public sealed record GatewayRow(GatewayInfo Gateway, string Name, string WanIp, string PortRange, string Status);
 
 public sealed record ResourceRow(RemoteResource Resource, string Name, string Kind, string Mode, string Size, string Status);
 public sealed record LocalResourceRow(LocalResource Resource, string Name, string Kind, string Mode, string Size, string Status, string Path);

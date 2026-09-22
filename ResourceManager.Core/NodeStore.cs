@@ -27,11 +27,31 @@ public sealed class NodeStore
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS peers (device_id TEXT PRIMARY KEY, ip TEXT NOT NULL, port INTEGER NOT NULL, nickname TEXT NOT NULL, avatar BLOB, last_seen TEXT);
+            CREATE TABLE IF NOT EXISTS gateways (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, wan_ip TEXT NOT NULL UNIQUE, router_udn TEXT,
+                port_start INTEGER NOT NULL, port_end INTEGER NOT NULL, last_refresh TEXT, last_status TEXT);
+            CREATE TABLE IF NOT EXISTS peer_endpoints (
+                device_id TEXT NOT NULL, ip TEXT NOT NULL, port INTEGER NOT NULL, kind TEXT NOT NULL,
+                gateway_id TEXT, source TEXT NOT NULL, last_success TEXT,
+                PRIMARY KEY(device_id, ip, port));
+            CREATE INDEX IF NOT EXISTS ix_peer_endpoints_gateway ON peer_endpoints(gateway_id, last_success);
+            CREATE TABLE IF NOT EXISTS local_port_mappings (
+                router_udn TEXT PRIMARY KEY, router_name TEXT NOT NULL, lan_ip TEXT NOT NULL, wan_ip TEXT NOT NULL,
+                external_port INTEGER NOT NULL, internal_port INTEGER NOT NULL, lease_seconds INTEGER NOT NULL,
+                last_verified TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS resources (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, mode TEXT NOT NULL, source_path TEXT NOT NULL, published_utc TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS favorites (peer_id TEXT NOT NULL, resource_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(peer_id, resource_id));
             CREATE TABLE IF NOT EXISTS downloads (id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, resource_id TEXT NOT NULL, resource_name TEXT NOT NULL, kind TEXT NOT NULL, target_path TEXT NOT NULL, status TEXT NOT NULL, downloaded_bytes INTEGER NOT NULL, total_bytes INTEGER NOT NULL, error TEXT);
             """;
         command.ExecuteNonQuery();
+        using (var migrate = db.CreateCommand())
+        {
+            migrate.CommandText = """
+                INSERT OR IGNORE INTO peer_endpoints(device_id,ip,port,kind,gateway_id,source,last_success)
+                SELECT device_id,ip,port,'Direct',NULL,'Legacy',last_seen FROM peers;
+                """;
+            migrate.ExecuteNonQuery();
+        }
         if (GetSetting("device_id") is null) SetSetting("device_id", Guid.NewGuid().ToString("N"));
         if (GetSetting("nickname") is null) SetSetting("nickname", Environment.UserName);
         if (GetSetting("port") is null) SetSetting("port", NodeDefaults.Port.ToString(CultureInfo.InvariantCulture));
@@ -114,9 +134,33 @@ public sealed class NodeStore
     }
 
     public PeerInfo? GetPeer(string deviceId) => GetPeers().FirstOrDefault(p => p.DeviceId == deviceId);
-    public bool IsKnownIp(string ip) => GetPeers().Any(p => p.Ip == ip);
 
-    public void UpsertPeer(PeerInfo peer)
+    public void UpdatePeerProfile(PeerInfo peer)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, """
+                UPDATE peers SET ip=$ip,port=$port,nickname=$name,avatar=$avatar,last_seen=$seen
+                WHERE device_id=$id
+                """, "$ip", peer.Ip, "$port", peer.Port, "$name", peer.Nickname, "$avatar", peer.Avatar,
+                "$seen", peer.LastSeenUtc?.ToString("O"), "$id", peer.DeviceId);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public bool IsKnownIp(string ip)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, "SELECT 1 FROM peer_endpoints WHERE ip=$ip LIMIT 1", "$ip", ip);
+            return command.ExecuteScalar() is not null;
+        }
+    }
+
+    public void UpsertPeer(PeerInfo peer, PeerEndpointKind endpointKind = PeerEndpointKind.Direct,
+        string? gatewayId = null, string source = "Direct")
     {
         if (peer.DeviceId.Length > 100 || peer.Nickname.Length > 80 || peer.Avatar?.Length > 512 * 1024 || peer.Port is < 1 or > 65535)
             throw new ArgumentException("设备资料无效。");
@@ -128,6 +172,197 @@ public sealed class NodeStore
                 ON CONFLICT(device_id) DO UPDATE SET ip=excluded.ip,port=excluded.port,nickname=excluded.nickname,avatar=excluded.avatar,last_seen=excluded.last_seen
                 """, "$id", peer.DeviceId, "$ip", peer.Ip, "$port", peer.Port, "$name", peer.Nickname, "$avatar", peer.Avatar, "$seen", peer.LastSeenUtc?.ToString("O"));
             command.ExecuteNonQuery();
+            using var endpoint = Cmd(db, """
+                INSERT INTO peer_endpoints(device_id,ip,port,kind,gateway_id,source,last_success)
+                VALUES($id,$ip,$port,$kind,$gateway,$source,$seen)
+                ON CONFLICT(device_id,ip,port) DO UPDATE SET
+                    kind=excluded.kind,gateway_id=excluded.gateway_id,source=excluded.source,last_success=excluded.last_success
+                """, "$id", peer.DeviceId, "$ip", peer.Ip, "$port", peer.Port,
+                "$kind", endpointKind.ToString(), "$gateway", gatewayId, "$source", source,
+                "$seen", peer.LastSeenUtc?.ToString("O"));
+            endpoint.ExecuteNonQuery();
+        }
+    }
+
+    public IReadOnlyList<PeerEndpoint> GetPeerEndpoints(string? deviceId = null, string? gatewayId = null)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            var clauses = new List<string>();
+            if (deviceId is not null) clauses.Add("device_id=$device");
+            if (gatewayId is not null) clauses.Add("gateway_id=$gateway");
+            var where = clauses.Count == 0 ? "" : " WHERE " + string.Join(" AND ", clauses);
+            using var command = Cmd(db, $"SELECT device_id,ip,port,kind,gateway_id,source,last_success FROM peer_endpoints{where} ORDER BY last_success DESC",
+                "$device", deviceId, "$gateway", gatewayId);
+            using var reader = command.ExecuteReader();
+            var result = new List<PeerEndpoint>();
+            while (reader.Read())
+                result.Add(new PeerEndpoint(reader.GetString(0), reader.GetString(1), reader.GetInt32(2),
+                    Enum.Parse<PeerEndpointKind>(reader.GetString(3)), reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.GetString(5), reader.IsDBNull(6) ? null : DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture)));
+            return result;
+        }
+    }
+
+    public void UpsertPeerEndpoint(PeerEndpoint endpoint)
+    {
+        if (endpoint.Port is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(endpoint));
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, """
+                INSERT INTO peer_endpoints(device_id,ip,port,kind,gateway_id,source,last_success)
+                VALUES($id,$ip,$port,$kind,$gateway,$source,$seen)
+                ON CONFLICT(device_id,ip,port) DO UPDATE SET
+                    kind=excluded.kind,gateway_id=excluded.gateway_id,source=excluded.source,last_success=excluded.last_success
+                """, "$id", endpoint.DeviceId, "$ip", endpoint.Ip, "$port", endpoint.Port,
+                "$kind", endpoint.Kind.ToString(), "$gateway", endpoint.GatewayId, "$source", endpoint.Source,
+                "$seen", endpoint.LastSuccessUtc?.ToString("O"));
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void MarkEndpointDeviceChanged(PeerEndpoint endpoint)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, """
+                UPDATE peer_endpoints SET source='DeviceChanged',last_success=NULL
+                WHERE device_id=$device AND ip=$ip AND port=$port
+                """, "$device", endpoint.DeviceId, "$ip", endpoint.Ip, "$port", endpoint.Port);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void TouchPeerEndpoint(string deviceId, string ip, int port)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, """
+                UPDATE peer_endpoints SET last_success=$seen
+                WHERE device_id=$device AND ip=$ip AND port=$port
+                """, "$seen", DateTimeOffset.UtcNow.ToString("O"), "$device", deviceId, "$ip", ip, "$port", port);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public IReadOnlyList<GatewayInfo> GetGateways()
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, "SELECT id,name,wan_ip,router_udn,port_start,port_end,last_refresh,last_status FROM gateways ORDER BY name COLLATE NOCASE");
+            using var reader = command.ExecuteReader();
+            var result = new List<GatewayInfo>();
+            while (reader.Read())
+                result.Add(new GatewayInfo(reader.GetString(0), reader.GetString(1), reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetInt32(4), reader.GetInt32(5),
+                    reader.IsDBNull(6) ? null : DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
+                    reader.IsDBNull(7) ? null : reader.GetString(7)));
+            return result;
+        }
+    }
+
+    public GatewayInfo SaveGateway(string name, string wanIp, string? existingId = null)
+    {
+        name = name.Trim();
+        wanIp = wanIp.Trim();
+        if (name.Length is < 1 or > 80) throw new ArgumentException("路由器名称须为 1 至 80 个字符。");
+        if (!System.Net.IPAddress.TryParse(wanIp, out var address) ||
+            address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+            throw new ArgumentException("请输入有效的路由器 WAN IPv4 地址。");
+        var id = existingId ?? Guid.NewGuid().ToString("N");
+        lock (gate)
+        {
+            using var db = Open();
+            using (var duplicate = Cmd(db, "SELECT 1 FROM gateways WHERE wan_ip=$ip AND id<>$id LIMIT 1",
+                       "$ip", wanIp, "$id", id))
+            {
+                if (duplicate.ExecuteScalar() is not null)
+                    throw new ArgumentException("这个路由器地址已经保存在其他入口中。");
+            }
+            using var command = Cmd(db, """
+                INSERT INTO gateways(id,name,wan_ip,router_udn,port_start,port_end,last_refresh,last_status)
+                VALUES($id,$name,$ip,NULL,$start,$end,NULL,'未检查')
+                ON CONFLICT(id) DO UPDATE SET name=excluded.name,wan_ip=excluded.wan_ip
+                """, "$id", id, "$name", name, "$ip", wanIp, "$start", NodeDefaults.GatewayPortStart,
+                "$end", NodeDefaults.GatewayPortEnd);
+            command.ExecuteNonQuery();
+        }
+        return GetGateways().Single(item => item.Id == id);
+    }
+
+    public void SaveGatewayRefresh(string id, string? routerUdn, string status)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, "UPDATE gateways SET router_udn=COALESCE($udn,router_udn),last_refresh=$time,last_status=$status WHERE id=$id",
+                "$udn", routerUdn, "$time", DateTimeOffset.UtcNow.ToString("O"), "$status", status, "$id", id);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void RemoveGateway(string id)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var transaction = db.BeginTransaction();
+            foreach (var sql in new[] { "DELETE FROM peer_endpoints WHERE gateway_id=$id", "DELETE FROM gateways WHERE id=$id" })
+            {
+                using var command = Cmd(db, sql, "$id", id);
+                command.Transaction = transaction;
+                command.ExecuteNonQuery();
+            }
+            transaction.Commit();
+        }
+    }
+
+    public IReadOnlyList<LocalPortMapping> GetLocalPortMappings()
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, "SELECT router_udn,router_name,lan_ip,wan_ip,external_port,internal_port,lease_seconds,last_verified FROM local_port_mappings ORDER BY router_name COLLATE NOCASE");
+            using var reader = command.ExecuteReader();
+            var result = new List<LocalPortMapping>();
+            while (reader.Read())
+                result.Add(new LocalPortMapping(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                    reader.GetInt32(4), reader.GetInt32(5), checked((uint)reader.GetInt64(6)),
+                    DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture)));
+            return result;
+        }
+    }
+
+    public void SaveLocalPortMapping(LocalPortMapping mapping)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, """
+                INSERT INTO local_port_mappings(router_udn,router_name,lan_ip,wan_ip,external_port,internal_port,lease_seconds,last_verified)
+                VALUES($udn,$name,$lan,$wan,$external,$internal,$lease,$seen)
+                ON CONFLICT(router_udn) DO UPDATE SET router_name=excluded.router_name,lan_ip=excluded.lan_ip,
+                    wan_ip=excluded.wan_ip,external_port=excluded.external_port,internal_port=excluded.internal_port,
+                    lease_seconds=excluded.lease_seconds,last_verified=excluded.last_verified
+                """, "$udn", mapping.RouterUdn, "$name", mapping.RouterName, "$lan", mapping.LanIp,
+                "$wan", mapping.WanIp, "$external", mapping.ExternalPort, "$internal", mapping.InternalPort,
+                "$lease", mapping.LeaseSeconds, "$seen", mapping.LastVerifiedUtc.ToString("O"));
+            command.ExecuteNonQuery();
+        }
+    }
+
+    public void RemoveLocalPortMapping(string routerUdn)
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, "DELETE FROM local_port_mappings WHERE router_udn=$udn", "$udn", routerUdn);
+            command.ExecuteNonQuery();
         }
     }
 
@@ -138,6 +373,12 @@ public sealed class NodeStore
             using var db = Open();
             using var command = Cmd(db, "UPDATE peers SET ip=$ip,port=$port WHERE device_id=$id", "$ip", ip, "$port", port, "$id", deviceId);
             command.ExecuteNonQuery();
+            using var endpoint = Cmd(db, """
+                INSERT INTO peer_endpoints(device_id,ip,port,kind,gateway_id,source,last_success)
+                VALUES($id,$ip,$port,'Direct',NULL,'Manual',$seen)
+                ON CONFLICT(device_id,ip,port) DO UPDATE SET kind='Direct',gateway_id=NULL,source='Manual',last_success=excluded.last_success
+                """, "$id", deviceId, "$ip", ip, "$port", port, "$seen", DateTimeOffset.UtcNow.ToString("O"));
+            endpoint.ExecuteNonQuery();
         }
     }
 
@@ -147,7 +388,7 @@ public sealed class NodeStore
         {
             using var db = Open();
             using var transaction = db.BeginTransaction();
-            foreach (var sql in new[] { "DELETE FROM favorites WHERE peer_id=$id", "DELETE FROM peers WHERE device_id=$id" })
+            foreach (var sql in new[] { "DELETE FROM favorites WHERE peer_id=$id", "DELETE FROM peer_endpoints WHERE device_id=$id", "DELETE FROM peers WHERE device_id=$id" })
             {
                 using var command = Cmd(db, sql, "$id", deviceId);
                 command.Transaction = transaction;
