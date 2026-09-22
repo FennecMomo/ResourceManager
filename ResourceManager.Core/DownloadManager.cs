@@ -28,11 +28,11 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
         var peer = store.GetPeer(job.PeerId) ?? throw new InvalidOperationException("发布者已从设备列表删除。");
         try
         {
-            var resources = await client.GetResourcesAsync(peer, cancellationToken);
+            var resources = await client.GetResourcesAsync(peer, cancellationToken).ConfigureAwait(false);
             var resource = resources.FirstOrDefault(r => r.Id == job.ResourceId)
                 ?? throw new FileNotFoundException("发布者已撤销资源。");
             if (!resource.Available || resource.Kind != job.Kind) throw new IOException("资源已不可用或类型已变化。");
-            var entries = await client.GetFilesAsync(peer, job.ResourceId, cancellationToken);
+            var entries = await client.GetFilesAsync(peer, job.ResourceId, cancellationToken).ConfigureAwait(false);
             if (job.Kind == ResourceKind.File && (entries.Count != 1 || entries[0].IsDirectory))
                 throw new InvalidDataException("文件目录信息无效。");
             var total = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
@@ -51,7 +51,7 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
                 {
                     job = job with { DownloadedBytes = Math.Min(total, baseCompleted + bytes) };
                     SaveAndReport(job, progress);
-                }, cancellationToken);
+                }, cancellationToken).ConfigureAwait(false);
                 completed += entry.Size;
                 job = job with { DownloadedBytes = completed };
                 SaveAndReport(job, progress);
@@ -101,7 +101,7 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
         var partial = target + ".rm-part";
         var tagPath = target + ".rm-etag";
         var offset = File.Exists(partial) ? new FileInfo(partial).Length : 0;
-        var tag = File.Exists(tagPath) ? await File.ReadAllTextAsync(tagPath, cancellationToken) : null;
+        var tag = File.Exists(tagPath) ? await File.ReadAllTextAsync(tagPath, cancellationToken).ConfigureAwait(false) : null;
         if (offset > file.Size || (offset > 0 && string.IsNullOrEmpty(tag)))
         {
             File.Delete(partial);
@@ -115,34 +115,34 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
             report(file.Size);
             return;
         }
-        using var response = await client.OpenFileAsync(peer, resourceId, file.RelativePath, offset, tag, cancellationToken);
+        using var response = await client.OpenFileAsync(peer, resourceId, file.RelativePath, offset, tag, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
         {
             File.Delete(partial);
             File.Delete(tagPath);
-            await DownloadFileAsync(peer, resourceId, file, target, report, cancellationToken);
+            await DownloadFileAsync(peer, resourceId, file, target, report, cancellationToken).ConfigureAwait(false);
             return;
         }
         response.EnsureSuccessStatusCode();
         var append = offset > 0 && response.StatusCode == HttpStatusCode.PartialContent && response.Content.Headers.ContentRange?.From == offset;
         if (!append) offset = 0;
         var responseTag = response.Headers.ETag?.ToString();
-        if (responseTag is not null) await File.WriteAllTextAsync(tagPath, responseTag, cancellationToken);
+        if (responseTag is not null) await File.WriteAllTextAsync(tagPath, responseTag, cancellationToken).ConfigureAwait(false);
         await using (var output = new FileStream(partial, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 64, true))
-        await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
+        await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
         {
             var buffer = new byte[1024 * 64];
             var copied = offset;
             var lastReport = DateTime.UtcNow;
             int count;
-            while ((count = await input.ReadAsync(buffer, cancellationToken)) != 0)
+            while ((count = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) != 0)
             {
-                await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+                await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
                 copied += count;
                 if ((DateTime.UtcNow - lastReport).TotalMilliseconds >= 250)
                 { report(copied); lastReport = DateTime.UtcNow; }
             }
-            await output.FlushAsync(cancellationToken);
+            await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             if (copied != file.Size) throw new IOException("下载大小与远端目录不一致，可重试。");
         }
         File.Move(partial, target, true);

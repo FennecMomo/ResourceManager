@@ -2,12 +2,31 @@ using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
 using System.Windows;
+using System.Windows.Threading;
 
 namespace ResourceManager.App;
 
 public partial class App : System.Windows.Application
 {
     private SingleInstanceCoordinator? singleInstance;
+
+    public App()
+    {
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception exception) AppLog.Write("未处理的进程异常", exception);
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            AppLog.Write("未观察的后台任务异常", args.Exception);
+            args.SetObserved();
+        };
+    }
+
+    private void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        AppLog.Write("未处理的界面异常", e.Exception);
+    }
 
     private async void App_Startup(object sender, StartupEventArgs e)
     {

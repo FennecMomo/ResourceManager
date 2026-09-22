@@ -113,9 +113,9 @@ public sealed class PeerClient(NodeStore store) : IDisposable
     {
         var settings = store.GetSettings();
         var hello = new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar);
-        using var response = await http.PostAsJsonAsync(new Uri(Base(ip, port), "hello"), hello, json, cancellationToken);
+        using var response = await http.PostAsJsonAsync(new Uri(Base(ip, port), "hello"), hello, json, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        var remote = await response.Content.ReadFromJsonAsync<PeerHello>(json, cancellationToken) ?? throw new InvalidDataException("对方未返回设备资料。");
+        var remote = await response.Content.ReadFromJsonAsync<PeerHello>(json, cancellationToken).ConfigureAwait(false) ?? throw new InvalidDataException("对方未返回设备资料。");
         if (remote.DeviceId == hello.DeviceId) throw new InvalidOperationException("不能连接到自己。");
         if (expectedDeviceId is not null && remote.DeviceId != expectedDeviceId) throw new InvalidOperationException("新地址对应的不是原设备。");
         if (store.GetPeers().Any(p => p.Ip == ip && p.DeviceId != remote.DeviceId))
@@ -127,7 +127,7 @@ public sealed class PeerClient(NodeStore store) : IDisposable
 
     public async Task<PeerHello> ProbeAsync(PeerInfo peer, CancellationToken cancellationToken = default)
     {
-        var remote = await http.GetFromJsonAsync<PeerHello>(Route(peer, "health"), json, cancellationToken)
+        var remote = await http.GetFromJsonAsync<PeerHello>(Route(peer, "health"), json, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidDataException("对方未返回设备资料。");
         if (remote.DeviceId != peer.DeviceId) throw new InvalidOperationException("此 IP 现在属于另一台设备。");
         store.UpsertPeer(peer with { Nickname = remote.Nickname, Avatar = remote.Avatar, Port = remote.Port, LastSeenUtc = DateTimeOffset.UtcNow });
@@ -136,14 +136,14 @@ public sealed class PeerClient(NodeStore store) : IDisposable
 
     public async Task<IReadOnlyList<RemoteResource>> GetResourcesAsync(PeerInfo peer, CancellationToken cancellationToken = default)
     {
-        await ProbeAsync(peer, cancellationToken);
-        return await http.GetFromJsonAsync<List<RemoteResource>>(Route(peer, "resources"), json, cancellationToken) ?? [];
+        await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        return await http.GetFromJsonAsync<List<RemoteResource>>(Route(peer, "resources"), json, cancellationToken).ConfigureAwait(false) ?? [];
     }
 
     public async Task<IReadOnlyList<RemoteFile>> GetFilesAsync(PeerInfo peer, string resourceId, CancellationToken cancellationToken = default)
     {
-        await ProbeAsync(peer, cancellationToken);
-        return await http.GetFromJsonAsync<List<RemoteFile>>(Route(peer, $"resources/{Uri.EscapeDataString(resourceId)}/tree"), json, cancellationToken) ?? [];
+        await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        return await http.GetFromJsonAsync<List<RemoteFile>>(Route(peer, $"resources/{Uri.EscapeDataString(resourceId)}/tree"), json, cancellationToken).ConfigureAwait(false) ?? [];
     }
 
     public Task<HttpResponseMessage> OpenFileAsync(PeerInfo peer, string resourceId, string relativePath, long offset, string? etag, CancellationToken cancellationToken = default)

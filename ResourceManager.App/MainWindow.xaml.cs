@@ -30,7 +30,7 @@ public partial class MainWindow : Window
     private readonly System.Drawing.Icon appIcon;
     private readonly Dictionary<string, string> peerStatus = [];
     private readonly Dictionary<string, IReadOnlyList<RemoteResource>> peerCatalogs = [];
-    private readonly HashSet<string> activeDownloads = [];
+    private readonly Dictionary<string, Task> activeDownloads = [];
     private byte[]? pendingAvatar;
     private bool refreshing;
     private bool exiting;
@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private StagedUpdate? stagedUpdate;
     private readonly bool startedWithWindows;
     private readonly CancellationTokenSource updateCancellation = new();
+    private readonly CancellationTokenSource downloadCancellation = new();
 
     public ObservableCollection<PeerRow> Peers { get; } = [];
     public ObservableCollection<ResourceRow> RemoteResources { get; } = [];
@@ -345,7 +346,7 @@ public partial class MainWindow : Window
         RemoveResourceButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
         RemoveFavoriteButton.IsEnabled = FavoritesGrid.SelectedItem is FavoriteRow;
         var download = DownloadsGrid.SelectedItem as DownloadRow;
-        ResumeDownloadButton.IsEnabled = download is not null && download.Job.Status != "已完成" && !activeDownloads.Contains(download.Job.Id);
+        ResumeDownloadButton.IsEnabled = download is not null && download.Job.Status != "已完成" && !activeDownloads.ContainsKey(download.Job.Id);
         OpenDownloadFolderButton.IsEnabled = download is not null;
     }
 
@@ -464,29 +465,75 @@ public partial class MainWindow : Window
             var job = downloader.CreateJob(peer, resource, dialog.SelectedPath);
             RefreshDownloadsView();
             Tabs.SelectedIndex = 3;
-            _ = StartDownloadAsync(job.Id);
+            QueueDownload(job.Id);
         }
         catch (Exception ex) { ShowError("创建下载失败", ex); }
     }
 
+    private void QueueDownload(string id)
+    {
+        if (activeDownloads.ContainsKey(id)) return;
+        var task = StartDownloadAsync(id);
+        activeDownloads.Add(id, task);
+        UpdateActions();
+    }
+
     private async Task StartDownloadAsync(string id)
     {
-        if (!activeDownloads.Add(id)) return;
-        UpdateActions();
         try
         {
-            var progress = new Progress<DownloadJob>(_ => RefreshDownloadsView());
-            await downloader.RunAsync(id, progress);
-            SetStatus("下载完成。本地文件在发布者离线时仍可使用。");
+            var progress = new Progress<DownloadJob>(UpdateDownloadProgressSafely);
+            await Task.Run(
+                () => downloader.RunAsync(id, progress, downloadCancellation.Token),
+                downloadCancellation.Token);
+            if (!exiting) SetStatus("下载完成。本地文件在发布者离线时仍可使用。");
         }
-        catch (Exception ex) { SetStatus($"下载中断：{ex.Message}。可在下载页继续。"); }
-        finally { activeDownloads.Remove(id); RefreshDownloadsView(); }
+        catch (OperationCanceledException) when (downloadCancellation.IsCancellationRequested)
+        {
+            if (!exiting) SetStatus("下载已暂停，可在下载页继续。");
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("资源下载失败", ex);
+            if (!exiting) SetStatus($"下载中断：{ex.Message}。可在下载页继续。");
+        }
+        finally
+        {
+            activeDownloads.Remove(id);
+            if (!exiting)
+            {
+                try { RefreshDownloadsView(); }
+                catch (Exception ex) { AppLog.Write("刷新下载列表失败", ex); }
+            }
+        }
+    }
+
+    private void UpdateDownloadProgressSafely(DownloadJob job)
+    {
+        if (exiting) return;
+        try
+        {
+            var index = Downloads.ToList().FindIndex(row => row.Job.Id == job.Id);
+            var peerName = index >= 0
+                ? Downloads[index].PeerName
+                : store.GetPeer(job.PeerId)?.Nickname ?? "未知设备";
+            var row = new DownloadRow(job, job.ResourceName, peerName, job.Status,
+                $"{SizeText(job.DownloadedBytes)} / {SizeText(job.TotalBytes)}", job.TargetPath, job.Error ?? "");
+            if (index >= 0) Downloads[index] = row;
+            else Downloads.Insert(0, row);
+            UpdateActions();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Write("更新下载进度失败", ex);
+            SetStatus("下载仍在后台进行，但进度显示暂时无法更新。");
+        }
     }
 
     private void ResumeDownload_Click(object sender, RoutedEventArgs e)
     {
         if (DownloadsGrid.SelectedItem is not DownloadRow row || row.Job.Status == "已完成") return;
-        _ = StartDownloadAsync(row.Job.Id);
+        QueueDownload(row.Job.Id);
     }
 
     private void OpenDownloadFolder_Click(object sender, RoutedEventArgs e)
@@ -640,12 +687,20 @@ public partial class MainWindow : Window
         exiting = true;
         timer.Stop();
         updateCancellation.Cancel();
+        downloadCancellation.Cancel();
+        var downloads = activeDownloads.Values.ToArray();
+        if (downloads.Length > 0)
+        {
+            try { await Task.WhenAll(downloads).WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (Exception ex) when (ex is OperationCanceledException or TimeoutException) { }
+        }
         try { await node.StopAsync(); }
         finally
         {
             client.Dispose();
             updateClient.Dispose();
             updateCancellation.Dispose();
+            downloadCancellation.Dispose();
             tray.Visible = false;
             tray.Dispose();
             appIcon.Dispose();

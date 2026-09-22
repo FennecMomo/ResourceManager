@@ -137,6 +137,39 @@ public sealed class PeerIntegrationTests
     }
 
     [Fact]
+    public async Task Download_DoesNotCaptureCallingSynchronizationContext()
+    {
+        using var space = new TestSpace();
+        var receiver = new NodeStore(space.PathFor("receiver"));
+        var publisher = new NodeStore(space.PathFor("publisher"));
+        var source = space.PathFor("background.bin");
+        var bytes = new byte[2 * 1024 * 1024];
+        Random.Shared.NextBytes(bytes);
+        File.WriteAllBytes(source, bytes);
+        publisher.AddResource(source, PublishMode.Reference);
+        var port = FreePort();
+        publisher.SaveSettings("发布者", null, port, true);
+        await using var node = new PeerNode(publisher);
+        await node.StartAsync(port, "127.0.0.1");
+        using var client = new PeerClient(receiver);
+        var peer = await client.ConnectAsync("127.0.0.1", port);
+        var resource = Assert.Single(await client.GetResourcesAsync(peer));
+        var downloads = new DownloadManager(receiver, client);
+        var job = downloads.CreateJob(peer, resource, space.PathFor("output"));
+
+        var previous = SynchronizationContext.Current;
+        var context = new RecordingSynchronizationContext();
+        Task<DownloadJob> run;
+        SynchronizationContext.SetSynchronizationContext(context);
+        try { run = downloads.RunAsync(job.Id); }
+        finally { SynchronizationContext.SetSynchronizationContext(previous); }
+
+        await run;
+        Assert.Equal(0, context.PostCount);
+        Assert.Equal(bytes, File.ReadAllBytes(job.TargetPath));
+    }
+
+    [Fact]
     public async Task PortConflict_ReportsFailure_WithoutStartingSecondNode()
     {
         using var space = new TestSpace();
@@ -156,6 +189,18 @@ public sealed class PeerIntegrationTests
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    private sealed class RecordingSynchronizationContext : SynchronizationContext
+    {
+        private int postCount;
+        public int PostCount => Volatile.Read(ref postCount);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref postCount);
+            ThreadPool.QueueUserWorkItem(_ => d(state));
+        }
     }
 
     private sealed class TestSpace : IDisposable
