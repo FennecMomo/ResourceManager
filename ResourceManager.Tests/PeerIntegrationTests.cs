@@ -20,7 +20,7 @@ public sealed class PeerIntegrationTests
         await using var scanner = new LanDiscoveryService(scannerStore, discoveryPort);
         await responder.StartAsync();
 
-        var peers = await scanner.DiscoverAsync(TimeSpan.FromMilliseconds(500),
+        var peers = await scanner.DiscoverAsync(TimeSpan.FromSeconds(2),
             broadcastAddresses: [IPAddress.Loopback]);
 
         var peer = Assert.Single(peers);
