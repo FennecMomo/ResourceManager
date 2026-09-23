@@ -69,18 +69,18 @@ public sealed class ResourceCatalog(NodeStore store)
         {
             var file = new FileInfo(resource.SourcePath);
             return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode,
-                file.Exists ? file.Length : 0, file.Exists ? file.LastWriteTimeUtc : resource.PublishedUtc, file.Exists);
+                file.Exists ? file.Length : 0, file.Exists ? file.LastWriteTimeUtc : resource.PublishedUtc, file.Exists, resource.Note);
         }
         var directory = new DirectoryInfo(resource.SourcePath);
-        if (!directory.Exists) return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false);
+        if (!directory.Exists) return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note);
         try
         {
             var files = EnumerateFiles(resource).ToList();
             return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, files.Where(f => !f.IsDirectory).Sum(f => f.Size),
-                files.Count == 0 ? directory.LastWriteTimeUtc : files.Max(f => f.ModifiedUtc), true);
+                files.Count == 0 ? directory.LastWriteTimeUtc : files.Max(f => f.ModifiedUtc), true, resource.Note);
         }
-        catch (IOException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false); }
-        catch (UnauthorizedAccessException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false); }
+        catch (IOException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note); }
+        catch (UnauthorizedAccessException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note); }
     }
 
     public IReadOnlyList<RemoteFile> ListFiles(string resourceId)

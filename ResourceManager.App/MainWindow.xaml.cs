@@ -279,7 +279,7 @@ public partial class MainWindow : Window
         }
         PeerEmptyText.Text = "这台设备还没有发布资源。";
         foreach (var resource in resources)
-            RemoteResources.Add(new ResourceRow(resource, resource.Name, KindText(resource.Kind), ModeText(resource.Mode), SizeText(resource.Size), resource.Available ? "可下载" : "原文件不可用"));
+            RemoteResources.Add(new ResourceRow(resource, resource.Name, KindText(resource.Kind), ModeText(resource.Mode), SizeText(resource.Size), resource.Available ? "可下载" : "原文件不可用", resource.Note));
         RemoteGrid.SelectedItem = RemoteResources.FirstOrDefault(r => r.Resource.Id == selected);
         UpdateActions();
     }
@@ -291,7 +291,7 @@ public partial class MainWindow : Window
         foreach (var item in store.GetResources())
         {
             var info = catalog.Describe(item);
-            LocalResources.Add(new LocalResourceRow(item, item.Name, KindText(item.Kind), ModeText(item.Mode), SizeText(info.Size), info.Available ? "可用" : "原文件不可用", item.SourcePath));
+            LocalResources.Add(new LocalResourceRow(item, item.Name, KindText(item.Kind), ModeText(item.Mode), SizeText(info.Size), info.Available ? "可用" : "原文件不可用", item.SourcePath, item.Note));
         }
         LocalGrid.SelectedItem = LocalResources.FirstOrDefault(r => r.Resource.Id == selected);
         UpdateActions();
@@ -315,7 +315,7 @@ public partial class MainWindow : Window
                 "设备已移除" => "设备已移除",
                 _ => "离线/无法连接"
             };
-            Favorites.Add(new FavoriteRow(item, item.Name, peer?.Nickname ?? "未知设备", KindText(item.Kind), status));
+            Favorites.Add(new FavoriteRow(item, item.Name, peer?.Nickname ?? "未知设备", KindText(item.Kind), status, remote?.Note ?? ""));
         }
         FavoritesGrid.SelectedItem = Favorites.FirstOrDefault(f => f.Favorite.PeerId == selected?.PeerId && f.Favorite.ResourceId == selected?.ResourceId);
         UpdateActions();
@@ -328,8 +328,9 @@ public partial class MainWindow : Window
         foreach (var item in store.GetDownloads())
         {
             var name = store.GetPeer(item.PeerId)?.Nickname ?? "未知设备";
+            var note = peerCatalogs.GetValueOrDefault(item.PeerId)?.FirstOrDefault(r => r.Id == item.ResourceId)?.Note ?? "";
             Downloads.Add(new DownloadRow(item, item.ResourceName, name, item.Status,
-                $"{SizeText(item.DownloadedBytes)} / {SizeText(item.TotalBytes)}", item.TargetPath, item.Error ?? ""));
+                $"{SizeText(item.DownloadedBytes)} / {SizeText(item.TotalBytes)}", item.TargetPath, item.Error ?? "", note));
         }
         DownloadsGrid.SelectedItem = Downloads.FirstOrDefault(d => d.Job.Id == selected);
         UpdateActions();
@@ -427,7 +428,16 @@ public partial class MainWindow : Window
 
     private void RemoteGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
     private void FavoritesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
-    private void LocalGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
+
+    private void LocalGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (LocalGrid.SelectedItem is LocalResourceRow row)
+        {
+            if (LocalNoteBox is not null) LocalNoteBox.Text = row.Note;
+        }
+        else if (LocalNoteBox is not null) LocalNoteBox.Text = "";
+        UpdateActions();
+    }
     private void DownloadsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
 
     private void UpdateActions()
@@ -435,6 +445,7 @@ public partial class MainWindow : Window
         if (RemoteFavoriteButton is null || RemoteDownloadButton is null || FavoriteDownloadButton is null ||
             RemovePeerButton is null || RemoveResourceButton is null || RemoveFavoriteButton is null || UpdateAddressButton is null ||
             SavePeerNoteButton is null || ClearPeerNoteButton is null ||
+            SaveLocalNoteButton is null || ClearLocalNoteButton is null ||
             ResumeDownloadButton is null || OpenDownloadFolderButton is null || RemoveDownloadButton is null) return;
         var remote = RemoteGrid.SelectedItem as ResourceRow;
         var peer = PeersGrid.SelectedItem as PeerRow;
@@ -446,6 +457,8 @@ public partial class MainWindow : Window
         SavePeerNoteButton.IsEnabled = peer is not null;
         ClearPeerNoteButton.IsEnabled = peer is not null && !string.IsNullOrEmpty(peer.Note);
         RemoveResourceButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
+        SaveLocalNoteButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
+        ClearLocalNoteButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow localRow && !string.IsNullOrEmpty(localRow.Note);
         RemoveFavoriteButton.IsEnabled = FavoritesGrid.SelectedItem is FavoriteRow;
         var download = DownloadsGrid.SelectedItem as DownloadRow;
         var removing = download is not null && removingDownloads.Contains(download.Job.Id);
@@ -780,6 +793,31 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError("撤销失败", ex); }
     }
 
+    private void SaveLocalNote_Click(object sender, RoutedEventArgs e)
+    {
+        if (LocalGrid.SelectedItem is not LocalResourceRow row) { SetStatus("请先选中已发布的资源。"); return; }
+        try
+        {
+            store.SetResourceNote(row.Resource.Id, LocalNoteBox.Text);
+            RefreshLocalView();
+            SetStatus(LocalNoteBox.Text.Trim().Length == 0 ? "已清空资源备注。" : "资源备注已保存，对方刷新目录后可见。");
+        }
+        catch (Exception ex) { ShowError("保存资源备注失败", ex); }
+    }
+
+    private void ClearLocalNote_Click(object sender, RoutedEventArgs e)
+    {
+        if (LocalGrid.SelectedItem is not LocalResourceRow row) { SetStatus("请先选中已发布的资源。"); return; }
+        try
+        {
+            store.SetResourceNote(row.Resource.Id, "");
+            LocalNoteBox.Text = "";
+            RefreshLocalView();
+            SetStatus("已清空资源备注。");
+        }
+        catch (Exception ex) { ShowError("清空资源备注失败", ex); }
+    }
+
     private void Favorite_Click(object sender, RoutedEventArgs e)
     {
         if (PeersGrid.SelectedItem is not PeerRow peer || RemoteGrid.SelectedItem is not ResourceRow row) return;
@@ -874,8 +912,9 @@ public partial class MainWindow : Window
             var peerName = index >= 0
                 ? Downloads[index].PeerName
                 : store.GetPeer(job.PeerId)?.Nickname ?? "未知设备";
+            var note = peerCatalogs.GetValueOrDefault(job.PeerId)?.FirstOrDefault(r => r.Id == job.ResourceId)?.Note ?? "";
             var row = new DownloadRow(job, job.ResourceName, peerName, job.Status,
-                $"{SizeText(job.DownloadedBytes)} / {SizeText(job.TotalBytes)}", job.TargetPath, job.Error ?? "");
+                $"{SizeText(job.DownloadedBytes)} / {SizeText(job.TotalBytes)}", job.TargetPath, job.Error ?? "", note);
             if (index >= 0) Downloads[index] = row;
             else Downloads.Insert(0, row);
             UpdateActions();
@@ -1233,10 +1272,20 @@ public sealed record PeerRow(PeerInfo Peer, string Status, ImageSource? Avatar, 
 
 public sealed record GatewayRow(GatewayInfo Gateway, string Name, string WanIp, string PortRange, string Status);
 
-public sealed record ResourceRow(RemoteResource Resource, string Name, string Kind, string Mode, string Size, string Status);
-public sealed record LocalResourceRow(LocalResource Resource, string Name, string Kind, string Mode, string Size, string Status, string Path);
-public sealed record FavoriteRow(Favorite Favorite, string Name, string PeerName, string Kind, string Status);
-public sealed record DownloadRow(DownloadJob Job, string Name, string PeerName, string Status, string Progress, string Target, string Error)
+public sealed record ResourceRow(RemoteResource Resource, string Name, string Kind, string Mode, string Size, string Status, string Note)
 {
+    public string NoteText => string.IsNullOrEmpty(Note) ? "" : $"备注：{Note}";
+}
+public sealed record LocalResourceRow(LocalResource Resource, string Name, string Kind, string Mode, string Size, string Status, string Path, string Note)
+{
+    public string NoteText => string.IsNullOrEmpty(Note) ? "" : $"备注：{Note}";
+}
+public sealed record FavoriteRow(Favorite Favorite, string Name, string PeerName, string Kind, string Status, string Note)
+{
+    public string NoteText => string.IsNullOrEmpty(Note) ? "" : $"备注：{Note}";
+}
+public sealed record DownloadRow(DownloadJob Job, string Name, string PeerName, string Status, string Progress, string Target, string Error, string Note)
+{
+    public string NoteText => string.IsNullOrEmpty(Note) ? "" : $"备注：{Note}";
     public double Percent => Job.TotalBytes > 0 ? Math.Clamp(Job.DownloadedBytes * 100d / Job.TotalBytes, 0, 100) : Job.Status == "已完成" ? 100 : 0;
 }

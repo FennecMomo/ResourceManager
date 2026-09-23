@@ -150,6 +150,42 @@ public sealed class PeerIntegrationTests
     }
 
     [Fact]
+    public async Task ResourceNotes_TravelWithCatalog_AndEditingKeepsIdentity()
+    {
+        using var space = new TestSpace();
+        var a = new NodeStore(space.PathFor("a"));
+        var b = new NodeStore(space.PathFor("b"));
+        var source = space.Write("manual.pdf", "内容");
+        var published = b.AddResource(source, PublishMode.Reference);
+        var portA = FreePort();
+        var portB = FreePort();
+        a.SaveSettings("甲", null, portA, true);
+        b.SaveSettings("乙", null, portB, true);
+        await using var nodeA = new PeerNode(a);
+        await using var nodeB = new PeerNode(b);
+        await nodeA.StartAsync(portA, "127.0.0.1");
+        await nodeB.StartAsync(portB, "127.0.0.1");
+        using var clientA = new PeerClient(a);
+        var peerB = await clientA.ConnectAsync("127.0.0.1", portB);
+
+        b.SetResourceNote(published.Id, "发给甲组的版本");
+        var received = (await clientA.GetResourcesAsync(peerB)).Single(r => r.Id == published.Id);
+        Assert.Equal("发给甲组的版本", received.Note);
+
+        a.SaveFavorite(new Favorite(peerB.DeviceId, published.Id, published.Name, published.Kind));
+        var updated = b.GetResource(published.Id)!;
+        Assert.Equal(published.Id, updated.Id);
+        Assert.Equal(published.PublishedUtc, updated.PublishedUtc);
+        Assert.Equal(published.SourcePath, updated.SourcePath);
+
+        b.SetResourceNote(published.Id, "");
+        var cleared = (await clientA.GetResourcesAsync(peerB)).Single(r => r.Id == published.Id);
+        Assert.Equal("", cleared.Note);
+        var favorite = Assert.Single(a.GetFavorites());
+        Assert.Equal(published.Id, favorite.ResourceId);
+    }
+
+    [Fact]
     public async Task Favorites_RemainOffline_AndWithdrawnResourceIsDistinct()
     {
         using var space = new TestSpace();

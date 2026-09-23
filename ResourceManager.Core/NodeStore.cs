@@ -46,6 +46,7 @@ public sealed class NodeStore
             CREATE TABLE IF NOT EXISTS downloads (id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, resource_id TEXT NOT NULL, resource_name TEXT NOT NULL, kind TEXT NOT NULL, target_path TEXT NOT NULL, status TEXT NOT NULL, downloaded_bytes INTEGER NOT NULL, total_bytes INTEGER NOT NULL, error TEXT);
             """;
         command.ExecuteNonQuery();
+        EnsureColumn(db, "resources", "note", "TEXT NOT NULL DEFAULT ''");
         using (var migrate = db.CreateCommand())
         {
             migrate.CommandText = """
@@ -66,6 +67,21 @@ public sealed class NodeStore
         var db = new SqliteConnection(connectionString);
         db.Open();
         return db;
+    }
+
+    private static void EnsureColumn(SqliteConnection db, string table, string column, string definition)
+    {
+        using (var check = db.CreateCommand())
+        {
+            check.CommandText = $"PRAGMA table_info({table})";
+            using var reader = check.ExecuteReader();
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) return;
+            }
+        }
+        using var alter = Cmd(db, $"ALTER TABLE {table} ADD COLUMN {column} {definition}");
+        alter.ExecuteNonQuery();
     }
 
     private static SqliteCommand Cmd(SqliteConnection db, string sql, params object?[] args)
@@ -506,15 +522,26 @@ public sealed class NodeStore
         lock (gate)
         {
             using var db = Open();
-            using var command = Cmd(db, "SELECT id,name,kind,mode,source_path,published_utc FROM resources ORDER BY published_utc DESC");
+            using var command = Cmd(db, "SELECT id,name,kind,mode,source_path,published_utc,note FROM resources ORDER BY published_utc DESC");
             using var reader = command.ExecuteReader();
             var result = new List<LocalResource>();
-            while (reader.Read()) result.Add(new LocalResource(reader.GetString(0), reader.GetString(1), Enum.Parse<ResourceKind>(reader.GetString(2)), Enum.Parse<PublishMode>(reader.GetString(3)), reader.GetString(4), DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture)));
+            while (reader.Read()) result.Add(new LocalResource(reader.GetString(0), reader.GetString(1), Enum.Parse<ResourceKind>(reader.GetString(2)), Enum.Parse<PublishMode>(reader.GetString(3)), reader.GetString(4), DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture), reader.IsDBNull(6) ? "" : reader.GetString(6)));
             return result;
         }
     }
 
     public LocalResource? GetResource(string id) => GetResources().FirstOrDefault(r => r.Id == id);
+
+    public void SetResourceNote(string id, string note)
+    {
+        note = NormalizeNote(note, 200, "资源备注");
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, "UPDATE resources SET note=$note WHERE id=$id", "$note", note, "$id", id);
+            if (command.ExecuteNonQuery() == 0) throw new InvalidOperationException("资源已撤销。");
+        }
+    }
 
     public void RemoveResource(string id)
     {
