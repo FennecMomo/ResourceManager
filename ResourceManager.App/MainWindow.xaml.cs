@@ -228,6 +228,7 @@ public partial class MainWindow : Window
     {
         var selected = (PeersGrid.SelectedItem as PeerRow)?.Peer.DeviceId;
         Peers.Clear();
+        var notes = store.GetPeerNotes();
         foreach (var peer in store.GetPeers())
         {
             var endpoint = store.GetPeerEndpoints(peer.DeviceId)
@@ -239,7 +240,7 @@ public partial class MainWindow : Window
                 ? $"{gateway?.Name ?? "路由器入口"} · {peer.Port}"
                 : endpoint is null ? "入口已移除" : "局域网直连";
             Peers.Add(new PeerRow(peer, peerStatus.GetValueOrDefault(peer.DeviceId, "未检查"),
-                AvatarImage(peer.Avatar), source));
+                AvatarImage(peer.Avatar), source, notes.GetValueOrDefault(peer.DeviceId, "")));
         }
         PeersGrid.SelectedItem = Peers.FirstOrDefault(p => p.Peer.DeviceId == selected);
         RefreshSelectedResources();
@@ -415,7 +416,12 @@ public partial class MainWindow : Window
     private void PeersGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (PeersGrid.SelectedItem is PeerRow row)
-        { PeerIpBox.Text = row.Ip; PeerPortBox.Text = row.Peer.Port.ToString(); }
+        {
+            PeerIpBox.Text = row.Ip;
+            PeerPortBox.Text = row.Peer.Port.ToString();
+            if (PeerNoteBox is not null) PeerNoteBox.Text = row.Note;
+        }
+        else if (PeerNoteBox is not null) PeerNoteBox.Text = "";
         RefreshSelectedResources();
     }
 
@@ -428,6 +434,7 @@ public partial class MainWindow : Window
     {
         if (RemoteFavoriteButton is null || RemoteDownloadButton is null || FavoriteDownloadButton is null ||
             RemovePeerButton is null || RemoveResourceButton is null || RemoveFavoriteButton is null || UpdateAddressButton is null ||
+            SavePeerNoteButton is null || ClearPeerNoteButton is null ||
             ResumeDownloadButton is null || OpenDownloadFolderButton is null || RemoveDownloadButton is null) return;
         var remote = RemoteGrid.SelectedItem as ResourceRow;
         var peer = PeersGrid.SelectedItem as PeerRow;
@@ -436,6 +443,8 @@ public partial class MainWindow : Window
         FavoriteDownloadButton.IsEnabled = (FavoritesGrid.SelectedItem as FavoriteRow)?.Status == "可下载";
         RemovePeerButton.IsEnabled = peer is not null;
         UpdateAddressButton.IsEnabled = peer is not null;
+        SavePeerNoteButton.IsEnabled = peer is not null;
+        ClearPeerNoteButton.IsEnabled = peer is not null && !string.IsNullOrEmpty(peer.Note);
         RemoveResourceButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
         RemoveFavoriteButton.IsEnabled = FavoritesGrid.SelectedItem is FavoriteRow;
         var download = DownloadsGrid.SelectedItem as DownloadRow;
@@ -699,11 +708,37 @@ public partial class MainWindow : Window
     private void RemovePeer_Click(object sender, RoutedEventArgs e)
     {
         if (PeersGrid.SelectedItem is not PeerRow row) return;
-        if (System.Windows.MessageBox.Show($"移除 {row.Nickname}？该设备的收藏也会删除。", "确认移除", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (System.Windows.MessageBox.Show($"移除 {row.Nickname}？该设备的收藏和本机备注也会删除。", "确认移除", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         store.RemovePeer(row.Peer.DeviceId);
         peerStatus.Remove(row.Peer.DeviceId);
         peerCatalogs.Remove(row.Peer.DeviceId);
         RefreshPeersView(); RefreshFavoritesView();
+        SetStatus("设备已移除，本机备注一并删除。");
+    }
+
+    private void SavePeerNote_Click(object sender, RoutedEventArgs e)
+    {
+        if (PeersGrid.SelectedItem is not PeerRow row) { SetStatus("请先选中设备。"); return; }
+        try
+        {
+            store.SavePeerNote(row.Peer.DeviceId, PeerNoteBox.Text);
+            RefreshPeersView();
+            SetStatus(PeerNoteBox.Text.Trim().Length == 0 ? "已清空本机备注。" : "备注已保存，仅本机可见。");
+        }
+        catch (Exception ex) { ShowError("保存备注失败", ex); }
+    }
+
+    private void ClearPeerNote_Click(object sender, RoutedEventArgs e)
+    {
+        if (PeersGrid.SelectedItem is not PeerRow row) { SetStatus("请先选中设备。"); return; }
+        try
+        {
+            store.SavePeerNote(row.Peer.DeviceId, "");
+            PeerNoteBox.Text = "";
+            RefreshPeersView();
+            SetStatus("已清空本机备注。");
+        }
+        catch (Exception ex) { ShowError("清空备注失败", ex); }
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
@@ -1188,11 +1223,12 @@ internal sealed class ActiveDownload(CancellationTokenSource cancellation)
     public Task Task { get; set; } = Task.CompletedTask;
 }
 
-public sealed record PeerRow(PeerInfo Peer, string Status, ImageSource? Avatar, string Source)
+public sealed record PeerRow(PeerInfo Peer, string Status, ImageSource? Avatar, string Source, string Note)
 {
     public string Nickname => Peer.Nickname;
     public string Ip => Peer.Ip;
     public string Address => $"{Peer.Ip}:{Peer.Port}";
+    public string NoteText => string.IsNullOrEmpty(Note) ? "" : $"备注：{Note}";
 }
 
 public sealed record GatewayRow(GatewayInfo Gateway, string Name, string WanIp, string PortRange, string Status);

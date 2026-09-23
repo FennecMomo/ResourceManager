@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Microsoft.Data.Sqlite;
 
 namespace ResourceManager.Core;
@@ -27,6 +28,7 @@ public sealed class NodeStore
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS peers (device_id TEXT PRIMARY KEY, ip TEXT NOT NULL, port INTEGER NOT NULL, nickname TEXT NOT NULL, avatar BLOB, last_seen TEXT);
+            CREATE TABLE IF NOT EXISTS peer_notes (device_id TEXT PRIMARY KEY, note TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS gateways (
                 id TEXT PRIMARY KEY, name TEXT NOT NULL, wan_ip TEXT NOT NULL UNIQUE, router_udn TEXT,
                 port_start INTEGER NOT NULL, port_end INTEGER NOT NULL, last_refresh TEXT, last_status TEXT);
@@ -147,6 +149,65 @@ public sealed class NodeStore
                 "$seen", peer.LastSeenUtc?.ToString("O"), "$id", peer.DeviceId);
             command.ExecuteNonQuery();
         }
+    }
+
+    public IReadOnlyDictionary<string, string> GetPeerNotes()
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, "SELECT device_id,note FROM peer_notes");
+            using var reader = command.ExecuteReader();
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            while (reader.Read()) result[reader.GetString(0)] = reader.GetString(1);
+            return result;
+        }
+    }
+
+    public string GetPeerNote(string deviceId) => GetPeerNotes().GetValueOrDefault(deviceId, "");
+
+    public void SavePeerNote(string deviceId, string note)
+    {
+        if (deviceId.Length is < 1 or > 100) throw new ArgumentException("设备编号无效。");
+        note = NormalizeNote(note, 100, "设备备注");
+        lock (gate)
+        {
+            using var db = Open();
+            using (var exists = Cmd(db, "SELECT 1 FROM peers WHERE device_id=$id LIMIT 1", "$id", deviceId))
+            {
+                if (exists.ExecuteScalar() is null) throw new InvalidOperationException("设备已不在本机列表中。");
+            }
+            if (note.Length == 0)
+            {
+                using var remove = Cmd(db, "DELETE FROM peer_notes WHERE device_id=$id", "$id", deviceId);
+                remove.ExecuteNonQuery();
+                return;
+            }
+            using var command = Cmd(db, """
+                INSERT INTO peer_notes(device_id,note) VALUES($id,$note)
+                ON CONFLICT(device_id) DO UPDATE SET note=excluded.note
+                """, "$id", deviceId, "$note", note);
+            command.ExecuteNonQuery();
+        }
+    }
+
+    internal static string NormalizeNote(string note, int maxLength, string label)
+    {
+        var builder = new StringBuilder(note.Length);
+        var pendingSpace = false;
+        foreach (var ch in note)
+        {
+            if (char.IsWhiteSpace(ch) || char.IsControl(ch))
+            {
+                if (builder.Length > 0) pendingSpace = true;
+                continue;
+            }
+            if (pendingSpace) { builder.Append(' '); pendingSpace = false; }
+            builder.Append(ch);
+        }
+        var normalized = builder.ToString();
+        if (normalized.Length > maxLength) throw new ArgumentException($"{label}不能超过 {maxLength} 个字符。");
+        return normalized;
     }
 
     public bool IsKnownIp(string ip)
@@ -388,7 +449,7 @@ public sealed class NodeStore
         {
             using var db = Open();
             using var transaction = db.BeginTransaction();
-            foreach (var sql in new[] { "DELETE FROM favorites WHERE peer_id=$id", "DELETE FROM peer_endpoints WHERE device_id=$id", "DELETE FROM peers WHERE device_id=$id" })
+            foreach (var sql in new[] { "DELETE FROM favorites WHERE peer_id=$id", "DELETE FROM peer_notes WHERE device_id=$id", "DELETE FROM peer_endpoints WHERE device_id=$id", "DELETE FROM peers WHERE device_id=$id" })
             {
                 using var command = Cmd(db, sql, "$id", deviceId);
                 command.Transaction = transaction;

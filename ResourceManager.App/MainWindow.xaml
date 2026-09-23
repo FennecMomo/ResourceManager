@@ -310,14 +310,22 @@
                                                 <Border Width="34" Height="34" CornerRadius="17" Background="#EAF2FF" VerticalAlignment="Center">
                                                     <Grid><TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Ellipse Width="34" Height="34"><Ellipse.Fill><ImageBrush ImageSource="{Binding Avatar}" Stretch="UniformToFill"/></Ellipse.Fill></Ellipse></Grid>
                                                 </Border>
-                                                <StackPanel Grid.Column="1" Margin="10,0,0,0"><TextBlock Text="{Binding Nickname}" Style="{StaticResource ItemTitle}"/><StackPanel Orientation="Horizontal" Margin="0,4,0,0" ToolTip="{Binding Address}"><TextBlock Text="{Binding Source}" Style="{StaticResource Meta}"/><TextBlock Text="  ·  " Style="{StaticResource Meta}"/><TextBlock Text="{Binding Status}" Style="{StaticResource StatusTextStyle}"/></StackPanel></StackPanel>
+                                                <StackPanel Grid.Column="1" Margin="10,0,0,0"><TextBlock Text="{Binding Nickname}" Style="{StaticResource ItemTitle}"/><StackPanel Orientation="Horizontal" Margin="0,4,0,0" ToolTip="{Binding Address}"><TextBlock Text="{Binding Source}" Style="{StaticResource Meta}"/><TextBlock Text="  ·  " Style="{StaticResource Meta}"/><TextBlock Text="{Binding Status}" Style="{StaticResource StatusTextStyle}"/></StackPanel><TextBlock Text="{Binding NoteText}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding NoteText}"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Meta}"><Style.Triggers><DataTrigger Binding="{Binding Note}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel>
                                             </Grid></DataTemplate></ListBox.ItemTemplate>
                                         </ListBox>
                                         <TextBlock Text="还没有连接的设备。&#10;在上方输入同事的 IP 地址开始连接。" TextAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center">
                                             <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Peers.Count}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                                         </TextBlock>
                                     </Grid>
-                                    <Button x:Name="RemovePeerButton" Grid.Row="2" Content="移除所选设备" Click="RemovePeer_Click" Style="{StaticResource DangerButton}" HorizontalAlignment="Left" Margin="0,12,0,0" IsEnabled="False"/>
+                                    <StackPanel Grid.Row="2" Margin="0,12,0,0">
+                                        <TextBlock Text="本机备注（仅自己可见，不改变对方昵称）" Style="{StaticResource Caption}"/>
+                                        <TextBox x:Name="PeerNoteBox" MaxLength="100" Margin="0,6,0,8" ToolTip="例如：设计部张工"/>
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button x:Name="SavePeerNoteButton" Content="保存备注" Click="SavePeerNote_Click" Margin="0,0,8,0" IsEnabled="False"/>
+                                            <Button x:Name="ClearPeerNoteButton" Content="清空" Click="ClearPeerNote_Click" Style="{StaticResource SecondaryButton}" IsEnabled="False"/>
+                                        </StackPanel>
+                                        <Button x:Name="RemovePeerButton" Content="移除所选设备" Click="RemovePeer_Click" Style="{StaticResource DangerButton}" HorizontalAlignment="Left" Margin="0,8,0,0" IsEnabled="False"/>
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                             <Border Grid.Column="2" Style="{StaticResource Card}">
