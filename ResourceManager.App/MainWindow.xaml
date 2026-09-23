@@ -378,7 +378,10 @@
                                         <Button x:Name="ClearLocalNoteButton" Content="清空" Click="ClearLocalNote_Click" Style="{StaticResource SecondaryButton}" IsEnabled="False"/>
                                     </StackPanel>
                                 </Grid>
-                                <Button x:Name="RemoveResourceButton" Content="撤销所选发布" Click="RemoveResource_Click" Style="{StaticResource DangerButton}" HorizontalAlignment="Left" IsEnabled="False"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="SendReminderButton" Content="发送提醒" Click="SendReminder_Click" IsEnabled="False" Margin="0,0,8,0"/>
+                                    <Button x:Name="RemoveResourceButton" Content="撤销所选发布" Click="RemoveResource_Click" Style="{StaticResource DangerButton}" IsEnabled="False"/>
+                                </StackPanel>
                             </StackPanel>
                         </Grid></Border>
                     </Grid>

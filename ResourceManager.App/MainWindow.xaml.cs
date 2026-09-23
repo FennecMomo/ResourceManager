@@ -28,12 +28,15 @@ public partial class MainWindow : Window
     private readonly DownloadManager downloader;
     private readonly ResourceCatalog catalog;
     private readonly UpdateClient updateClient;
+    private readonly ReminderService reminders;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(15) };
     private readonly WinForms.NotifyIcon tray;
     private readonly MemoryStream iconStream;
     private readonly System.Drawing.Icon appIcon;
     private readonly Dictionary<string, string> peerStatus = [];
     private readonly Dictionary<string, IReadOnlyList<RemoteResource>> peerCatalogs = [];
+    private readonly Dictionary<string, string[]> peerCapabilities = [];
+    private readonly HashSet<string> openReminders = [];
     private readonly Dictionary<string, ActiveDownload> activeDownloads = [];
     private readonly HashSet<string> removingDownloads = [];
     private byte[]? pendingAvatar;
@@ -72,13 +75,15 @@ public partial class MainWindow : Window
         discovery = new LanDiscoveryService(store);
         upnpGatewayClient = new UpnpGatewayClient();
         mappingManager = new UpnpPortMappingManager(store, upnpGatewayClient);
-        node = new PeerNode(store, discovery, mappingManager);
         client = new PeerClient(store);
+        reminders = new ReminderService(store, client);
+        node = new PeerNode(store, discovery, mappingManager, reminders);
         gatewayDiscovery = new GatewayDiscoveryService(store, client);
         downloader = new DownloadManager(store, client);
         catalog = new ResourceCatalog(store);
         updateClient = new UpdateClient(store.DataDirectory);
         updateClient.CleanupOldDownloads();
+        reminders.ReminderReceived += delivery => Dispatcher.BeginInvoke(() => ShowReminder(delivery));
         var settings = store.GetSettings();
         NicknameBox.Text = settings.Profile.Nickname;
         ListenPortBox.Text = settings.ListenPort.ToString();
@@ -356,7 +361,9 @@ public partial class MainWindow : Window
                     var candidate = peer with { Ip = endpoint.Ip, Port = endpoint.Port };
                     try
                     {
-                        peerCatalogs[peer.DeviceId] = await client.GetResourcesAsync(candidate);
+                        var catalog = await client.GetCatalogAsync(candidate);
+                        peerCatalogs[peer.DeviceId] = catalog.Resources;
+                        peerCapabilities[peer.DeviceId] = catalog.Hello.Capabilities ?? [];
                         peerStatus[peer.DeviceId] = "在线";
                         connected = true;
                         break;
@@ -373,6 +380,7 @@ public partial class MainWindow : Window
                 if (peerStatus.GetValueOrDefault(peer.DeviceId) != "设备已变更")
                     peerStatus[peer.DeviceId] = "离线";
                 peerCatalogs.Remove(peer.DeviceId);
+                peerCapabilities.Remove(peer.DeviceId);
             }
             RefreshPeersView();
             RefreshFavoritesView();
@@ -445,7 +453,7 @@ public partial class MainWindow : Window
         if (RemoteFavoriteButton is null || RemoteDownloadButton is null || FavoriteDownloadButton is null ||
             RemovePeerButton is null || RemoveResourceButton is null || RemoveFavoriteButton is null || UpdateAddressButton is null ||
             SavePeerNoteButton is null || ClearPeerNoteButton is null ||
-            SaveLocalNoteButton is null || ClearLocalNoteButton is null ||
+            SaveLocalNoteButton is null || ClearLocalNoteButton is null || SendReminderButton is null ||
             ResumeDownloadButton is null || OpenDownloadFolderButton is null || RemoveDownloadButton is null) return;
         var remote = RemoteGrid.SelectedItem as ResourceRow;
         var peer = PeersGrid.SelectedItem as PeerRow;
@@ -457,6 +465,7 @@ public partial class MainWindow : Window
         SavePeerNoteButton.IsEnabled = peer is not null;
         ClearPeerNoteButton.IsEnabled = peer is not null && !string.IsNullOrEmpty(peer.Note);
         RemoveResourceButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
+        SendReminderButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow localSendRow && localSendRow.Status == "可用";
         SaveLocalNoteButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
         ClearLocalNoteButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow localRow && !string.IsNullOrEmpty(localRow.Note);
         RemoveFavoriteButton.IsEnabled = FavoritesGrid.SelectedItem is FavoriteRow;
@@ -634,6 +643,7 @@ public partial class MainWindow : Window
         {
             peerStatus[deviceId] = "离线";
             peerCatalogs.Remove(deviceId);
+            peerCapabilities.Remove(deviceId);
         }
         RefreshGatewaysView();
         RefreshPeersView();
@@ -725,6 +735,7 @@ public partial class MainWindow : Window
         store.RemovePeer(row.Peer.DeviceId);
         peerStatus.Remove(row.Peer.DeviceId);
         peerCatalogs.Remove(row.Peer.DeviceId);
+        peerCapabilities.Remove(row.Peer.DeviceId);
         RefreshPeersView(); RefreshFavoritesView();
         SetStatus("设备已移除，本机备注一并删除。");
     }
@@ -816,6 +827,50 @@ public partial class MainWindow : Window
             SetStatus("已清空资源备注。");
         }
         catch (Exception ex) { ShowError("清空资源备注失败", ex); }
+    }
+
+    private void SendReminder_Click(object sender, RoutedEventArgs e)
+    {
+        if (LocalGrid.SelectedItem is not LocalResourceRow row) { SetStatus("请先选中已发布的资源。"); return; }
+        if (row.Status != "可用") { SetStatus("资源原文件当前不可用，无法发送提醒。"); return; }
+        var candidates = Peers.Where(item => item.Status == "在线" &&
+                peerCapabilities.GetValueOrDefault(item.Peer.DeviceId, [])
+                    .Contains(NodeDefaults.ReminderCapability, StringComparer.Ordinal))
+            .Select(item => item.Peer).ToArray();
+        if (candidates.Length == 0) { SetStatus("当前没有支持定向提醒的在线设备。"); return; }
+        var dialog = new SendReminderDialog($"{row.Name}（{row.Kind} · {row.Size}）", candidates) { Owner = this, Icon = Icon };
+        if (dialog.ShowDialog() != true || dialog.SelectedPeer is null) return;
+        SendReminderAsync(dialog.SelectedPeer, row.Resource);
+    }
+
+    private async void SendReminderAsync(PeerInfo peer, LocalResource resource)
+    {
+        try
+        {
+            var settings = store.GetSettings();
+            var request = new ResourceReminderRequest(NodeDefaults.ReminderCapability, Guid.NewGuid().ToString("N"),
+                settings.Profile.DeviceId, resource.Id, resource.Name, resource.Kind, resource.Note, DateTimeOffset.UtcNow);
+            var receipt = await client.SendReminderAsync(peer, request);
+            SetStatus(receipt.Accepted ? $"提醒已送达 {peer.Nickname}。" : $"提醒未送达：{receipt.Reason}");
+        }
+        catch (Exception ex) { ShowError("发送提醒失败", ex); }
+    }
+
+    private void ShowReminder(ReminderDelivery delivery)
+    {
+        if (exiting) return;
+        var key = delivery.Sender.DeviceId + "\0" + delivery.Resource.Id;
+        if (!openReminders.Add(key)) return;
+        var window = new ReminderWindow(delivery.Sender, delivery.Resource, delivery.SentUtc);
+        window.Closed += (_, _) => openReminders.Remove(key);
+        window.DownloadRequested += (_, _) => { window.Close(); BeginDownload(delivery.Sender, delivery.Resource); };
+        window.MuteRequested += (_, _) =>
+        {
+            reminders.Mute(delivery.Sender.DeviceId, TimeSpan.FromHours(1));
+            SetStatus($"已静音 {delivery.Sender.Nickname} 的提醒 1 小时。");
+        };
+        window.Show();
+        window.Activate();
     }
 
     private void Favorite_Click(object sender, RoutedEventArgs e)

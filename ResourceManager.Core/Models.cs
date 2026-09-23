@@ -34,6 +34,10 @@ public sealed record RemoteFile(string RelativePath, long Size, DateTimeOffset M
 public sealed record Favorite(string PeerId, string ResourceId, string Name, ResourceKind Kind);
 public sealed record DownloadJob(string Id, string PeerId, string ResourceId, string ResourceName, ResourceKind Kind, string TargetPath, string Status, long DownloadedBytes, long TotalBytes, string? Error);
 public sealed record SharedUpdatePackage(string ResourceId, string Version, long Size, string Sha256, DateTimeOffset ModifiedUtc);
+public sealed record ResourceReminderRequest(string Protocol, string MessageId, string SenderDeviceId, string ResourceId,
+    string ResourceName, ResourceKind Kind, string Note, DateTimeOffset SentUtc);
+public sealed record ReminderReceipt(bool Accepted, string? Reason = null, int StatusCode = 200);
+public sealed record ReminderDelivery(PeerInfo Sender, RemoteResource Resource, DateTimeOffset SentUtc, DateTimeOffset ReceivedUtc);
 public sealed record AppSettings(NodeProfile Profile, int ListenPort, bool CloseToTray, bool AutoUpdate);
 
 public static class NodeDefaults
@@ -44,5 +48,6 @@ public static class NodeDefaults
     public const int GatewayPortEnd = 48099;
     public const string RouterDiscoveryCapability = "router-discovery-v1";
     public const string UpnpMappingCapability = "upnp-mapping-v1";
+    public const string ReminderCapability = "reminder-v1";
     public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ResourceManager");
 }

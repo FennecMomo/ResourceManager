@@ -15,6 +15,7 @@ public sealed class PeerNode : IAsyncDisposable
     private readonly ResourceCatalog catalog;
     private readonly RouterDiscoveryCoordinator routerDiscovery;
     private readonly UpnpPortMappingManager mappingManager;
+    private readonly ReminderService? reminders;
     private WebApplication? app;
 
     public PeerNode(NodeStore store)
@@ -23,10 +24,12 @@ public sealed class PeerNode : IAsyncDisposable
     {
     }
 
-    public PeerNode(NodeStore store, LanDiscoveryService discovery, UpnpPortMappingManager mappingManager)
+    public PeerNode(NodeStore store, LanDiscoveryService discovery, UpnpPortMappingManager mappingManager,
+        ReminderService? reminders = null)
     {
         this.store = store;
         this.mappingManager = mappingManager;
+        this.reminders = reminders;
         catalog = new ResourceCatalog(store);
         routerDiscovery = new RouterDiscoveryCoordinator(store, discovery, mappingManager);
     }
@@ -38,7 +41,7 @@ public sealed class PeerNode : IAsyncDisposable
     {
         var settings = store.GetSettings();
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
-            [NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability]);
+            [NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability]);
     }
 
     public async Task StartAsync(int port, string listenAddress = "0.0.0.0", CancellationToken cancellationToken = default)
@@ -59,6 +62,11 @@ public sealed class PeerNode : IAsyncDisposable
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                     return;
                 }
+            }
+            if (context.Request.Path.Value == "/api/v1/reminders")
+            {
+                var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+                if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = ReminderService.MaxBodyBytes;
             }
             await next();
         });
@@ -108,6 +116,15 @@ public sealed class PeerNode : IAsyncDisposable
         });
         instance.MapPost("/api/v1/router-mapping/ensure", async (CancellationToken token) =>
             Results.Ok(await mappingManager.EnsureMappingAsync(cancellationToken: token).ConfigureAwait(false)));
+        if (reminders is not null)
+        {
+            instance.MapPost("/api/v1/reminders", async (ResourceReminderRequest request, HttpContext context,
+                CancellationToken token) =>
+            {
+                var receipt = await reminders.ReceiveAsync(request, RemoteIp(context), token).ConfigureAwait(false);
+                return Results.Json(receipt, statusCode: receipt.StatusCode);
+            });
+        }
 
         Port = port;
         try
@@ -168,7 +185,8 @@ public sealed class PeerClient(NodeStore store) : IDisposable
     {
         var settings = store.GetSettings();
         var hello = new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort,
-            settings.Profile.Avatar, [NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability]);
+            settings.Profile.Avatar,
+            [NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability]);
         using var response = await http.PostAsJsonAsync(new Uri(Base(ip, port), "hello"), hello, Json, cancellationToken)
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -237,12 +255,49 @@ public sealed class PeerClient(NodeStore store) : IDisposable
                ?? throw new InvalidDataException("目标设备未返回映射结果。");
     }
 
+    public async Task<(PeerHello Hello, IReadOnlyList<RemoteResource> Resources)> GetCatalogAsync(PeerInfo peer,
+        CancellationToken cancellationToken = default)
+    {
+        var hello = await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        var resources = await http.GetFromJsonAsync<List<RemoteResource>>(Route(peer, "resources"), Json, cancellationToken)
+                   .ConfigureAwait(false) ?? [];
+        return (hello, resources);
+    }
+
     public async Task<IReadOnlyList<RemoteResource>> GetResourcesAsync(PeerInfo peer,
         CancellationToken cancellationToken = default)
     {
-        await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
-        return await http.GetFromJsonAsync<List<RemoteResource>>(Route(peer, "resources"), Json, cancellationToken)
-                   .ConfigureAwait(false) ?? [];
+        return (await GetCatalogAsync(peer, cancellationToken).ConfigureAwait(false)).Resources;
+    }
+
+    public async Task<ReminderReceipt> SendReminderAsync(PeerInfo peer, ResourceReminderRequest reminder,
+        CancellationToken cancellationToken = default)
+    {
+        using var response = await http.PostAsJsonAsync(Route(peer, "reminders"), reminder, Json, cancellationToken)
+            .ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            throw new InvalidOperationException("对方版本不支持定向提醒。");
+        if (response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Forbidden or
+            HttpStatusCode.Conflict or HttpStatusCode.TooManyRequests or HttpStatusCode.RequestEntityTooLarge)
+        {
+            string? reason = null;
+            try
+            {
+                reason = (await response.Content.ReadFromJsonAsync<ReminderReceipt>(Json, cancellationToken)
+                    .ConfigureAwait(false))?.Reason;
+            }
+            catch (Exception) { }
+            throw new InvalidOperationException(reason ?? response.StatusCode switch
+            {
+                HttpStatusCode.Forbidden => "对方未登记本机设备，请先建立连接。",
+                HttpStatusCode.TooManyRequests => "发送过于频繁，请稍后再试。",
+                HttpStatusCode.RequestEntityTooLarge => "提醒内容过大。",
+                _ => "对方拒绝了这条提醒。"
+            });
+        }
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ReminderReceipt>(Json, cancellationToken).ConfigureAwait(false)
+               ?? throw new InvalidDataException("对方未返回提醒结果。");
     }
 
     public async Task<SharedUpdatePackage?> GetSharedUpdateAsync(PeerInfo peer,
