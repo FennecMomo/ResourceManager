@@ -26,7 +26,7 @@
         <ListBox x:Name="TargetList" Grid.Row="2">
             <ListBox.ItemTemplate><DataTemplate><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
-                <StackPanel Grid.Column="1" Margin="10,0,0,0"><TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold" Foreground="#1B2B43" TextTrimming="CharacterEllipsis"/><TextBlock FontSize="12" Foreground="#708099" Margin="0,4,0,0"><Run Text="{Binding Address}"/><Run Text="  ·  "/><Run Text="{Binding Detail}"/></TextBlock></StackPanel>
+                <StackPanel Grid.Column="1" Margin="10,0,0,0"><TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold" Foreground="#1B2B43" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Summary}" FontSize="12" Foreground="#708099" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
             </Grid></DataTemplate></ListBox.ItemTemplate>
         </ListBox>
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">

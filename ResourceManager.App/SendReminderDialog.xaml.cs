@@ -46,8 +46,7 @@ public partial class SendReminderDialog : Window
 
         public ReminderTarget Target { get; } = target;
         public string DisplayName => Target.DisplayName;
-        public string Address => $"{Target.Peer.Ip}:{Target.Peer.Port}";
-        public string Detail => Target.Detail;
+        public string Summary => $"{Target.Peer.Ip}:{Target.Peer.Port}  ·  {Target.Detail}";
 
         public bool IsChecked
         {
