@@ -49,6 +49,6 @@ dotnet publish .\ResourceManager.App\ResourceManager.App.csproj -c Release -r wi
 
 ## 版本与许可
 
-当前版本为 `0.3.1`，版本号格式为 `系统.模块.修改`，Git 提交信息须带上对应的版本号。发布版本使用同号的 `v系统.模块.修改` Git 标签；标签推送后，GitHub Actions 会构建、测试并创建带单文件 EXE 的 GitHub Release。图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows 图标。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
+当前版本为 `0.3.2`，版本号格式为 `系统.模块.修改`，Git 提交信息须带上对应的版本号。发布版本使用同号的 `v系统.模块.修改` Git 标签；标签推送后，GitHub Actions 会构建、测试并创建带单文件 EXE 的 GitHub Release。图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows 图标。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
 
 后续需求、拆分版本和验收场景记录在 [开发待办与版本路线](docs/roadmap.md)。
