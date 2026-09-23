@@ -1,0 +1,46 @@
+<Window x:Class="ResourceManager.App.DeviceNoteDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="设备备注" Width="440" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F6F8FB" FontFamily="Segoe UI">
+    <Window.Resources>
+        <Style x:Key="DialogButton" TargetType="Button">
+            <Setter Property="Height" Value="38"/><Setter Property="Padding" Value="18,0"/>
+            <Setter Property="Background" Value="#2867D9"/><Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/><Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="9" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></ControlTemplate></Setter.Value></Setter>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Height" Value="38"/><Setter Property="Padding" Value="11,0"/>
+            <Setter Property="Foreground" Value="#1B2B43"/><Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#DCE4EE"/><Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="13"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="InputBorder" CornerRadius="9" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False"
+                                          HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Hidden"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="InputBorder" Property="BorderBrush" Value="#2867D9"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <StackPanel Margin="24">
+        <TextBlock Text="设备备注" FontSize="20" FontWeight="SemiBold" Foreground="#1B2B43"/>
+        <TextBlock x:Name="DeviceText" FontSize="12" Foreground="#708099" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="备注只保存在本机，不会发送给对方，也不改变对方昵称。" FontSize="12" Foreground="#708099" Margin="0,10,0,0" TextWrapping="Wrap"/>
+        <TextBox x:Name="NoteBox" MaxLength="100" Margin="0,12,0,16" ToolTip="例如：设计部张工"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="取消" IsCancel="True" Style="{StaticResource DialogButton}" Background="#EDF2F8" Foreground="#1B2B43" Margin="0,0,8,0"/>
+            <Button Content="保存" IsDefault="True" Click="Save_Click" Style="{StaticResource DialogButton}"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

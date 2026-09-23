@@ -87,7 +87,6 @@ public partial class MainWindow : Window
         var settings = store.GetSettings();
         NicknameBox.Text = settings.Profile.Nickname;
         ListenPortBox.Text = settings.ListenPort.ToString();
-        PeerPortBox.Text = settings.ListenPort.ToString();
         CloseToTrayBox.IsChecked = settings.CloseToTray;
         AutoUpdateBox.IsChecked = settings.AutoUpdate;
         AutoStartBox.IsChecked = AutoStartManager.IsEnabled();
@@ -422,17 +421,7 @@ public partial class MainWindow : Window
         if (Tabs.SelectedIndex == 4) await RefreshRouterInfoAsync();
     }
 
-    private void PeersGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (PeersGrid.SelectedItem is PeerRow row)
-        {
-            PeerIpBox.Text = row.Ip;
-            PeerPortBox.Text = row.Peer.Port.ToString();
-            if (PeerNoteBox is not null) PeerNoteBox.Text = row.Note;
-        }
-        else if (PeerNoteBox is not null) PeerNoteBox.Text = "";
-        RefreshSelectedResources();
-    }
+    private void PeersGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSelectedResources();
 
     private void RemoteGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
     private void FavoritesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
@@ -451,9 +440,8 @@ public partial class MainWindow : Window
     private void UpdateActions()
     {
         if (RemoteFavoriteButton is null || RemoteDownloadButton is null || FavoriteDownloadButton is null ||
-            RemovePeerButton is null || RemoveResourceButton is null || RemoveFavoriteButton is null || UpdateAddressButton is null ||
-            SavePeerNoteButton is null || ClearPeerNoteButton is null ||
-            SaveLocalNoteButton is null || ClearLocalNoteButton is null || SendReminderButton is null ||
+            RemovePeerButton is null || RemoveResourceButton is null || RemoveFavoriteButton is null || PeerNoteButton is null ||
+            SaveLocalNoteButton is null || ClearLocalNoteButton is null ||
             ResumeDownloadButton is null || OpenDownloadFolderButton is null || RemoveDownloadButton is null) return;
         var remote = RemoteGrid.SelectedItem as ResourceRow;
         var peer = PeersGrid.SelectedItem as PeerRow;
@@ -461,11 +449,8 @@ public partial class MainWindow : Window
         RemoteDownloadButton.IsEnabled = remote?.Resource.Available == true && peer?.Status == "在线";
         FavoriteDownloadButton.IsEnabled = (FavoritesGrid.SelectedItem as FavoriteRow)?.Status == "可下载";
         RemovePeerButton.IsEnabled = peer is not null;
-        UpdateAddressButton.IsEnabled = peer is not null;
-        SavePeerNoteButton.IsEnabled = peer is not null;
-        ClearPeerNoteButton.IsEnabled = peer is not null && !string.IsNullOrEmpty(peer.Note);
+        PeerNoteButton.IsEnabled = peer is not null;
         RemoveResourceButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
-        SendReminderButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow localSendRow && localSendRow.Status == "可用";
         SaveLocalNoteButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
         ClearLocalNoteButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow localRow && !string.IsNullOrEmpty(localRow.Note);
         RemoveFavoriteButton.IsEnabled = FavoritesGrid.SelectedItem is FavoriteRow;
@@ -478,30 +463,18 @@ public partial class MainWindow : Window
         RemoveDownloadButton.Content = active ? "暂停并移除" : "移除任务";
     }
 
-    private async void Connect_Click(object sender, RoutedEventArgs e)
+    private async void RefreshPeers_Click(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            if (!int.TryParse(PeerPortBox.Text, out var port)) throw new ArgumentException("端口无效。");
-            var peer = await client.ConnectAsync(PeerIpBox.Text.Trim(), port);
-            SetStatus($"已连接 {peer.Nickname}（{peer.Ip}:{peer.Port}）。");
-            await RefreshAllAsync();
-            PeersGrid.SelectedItem = Peers.FirstOrDefault(p => p.Peer.DeviceId == peer.DeviceId);
-        }
-        catch (Exception ex) { ShowError("连接失败", ex); }
-    }
-
-    private async void DiscoverPeers_Click(object sender, RoutedEventArgs e)
-    {
-        DiscoverPeersButton.IsEnabled = false;
-        DiscoverPeersButton.Content = "正在查找…";
+        RefreshPeersButton.IsEnabled = false;
+        RefreshPeersButton.Content = "正在查找…";
         SetStatus("正在查找同一局域网内的设备…");
         try
         {
             var found = await discovery.DiscoverAsync(TimeSpan.FromSeconds(2), updateCancellation.Token);
             if (found.Count == 0)
             {
-                SetStatus("没有找到其他设备。请确认对方软件正在运行，并允许公司网络访问。");
+                await RefreshAllAsync();
+                SetStatus("没有发现新的局域网设备；已刷新现有设备状态。");
                 return;
             }
 
@@ -530,8 +503,8 @@ public partial class MainWindow : Window
         {
             if (!exiting)
             {
-                DiscoverPeersButton.Content = "查找局域网设备";
-                DiscoverPeersButton.IsEnabled = true;
+                RefreshPeersButton.Content = "刷新";
+                RefreshPeersButton.IsEnabled = true;
             }
         }
     }
@@ -715,19 +688,6 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError("删除外部映射失败", ex); }
     }
 
-    private async void UpdateAddress_Click(object sender, RoutedEventArgs e)
-    {
-        if (PeersGrid.SelectedItem is not PeerRow selected) { SetStatus("请先选中设备。"); return; }
-        try
-        {
-            if (!int.TryParse(PeerPortBox.Text, out var port)) throw new ArgumentException("端口无效。");
-            await client.ConnectAsync(PeerIpBox.Text.Trim(), port, selected.Peer.DeviceId);
-            SetStatus("设备地址已更新。");
-            await RefreshAllAsync();
-        }
-        catch (Exception ex) { ShowError("更新地址失败", ex); }
-    }
-
     private void RemovePeer_Click(object sender, RoutedEventArgs e)
     {
         if (PeersGrid.SelectedItem is not PeerRow row) return;
@@ -740,29 +700,18 @@ public partial class MainWindow : Window
         SetStatus("设备已移除，本机备注一并删除。");
     }
 
-    private void SavePeerNote_Click(object sender, RoutedEventArgs e)
+    private void EditPeerNote_Click(object sender, RoutedEventArgs e)
     {
         if (PeersGrid.SelectedItem is not PeerRow row) { SetStatus("请先选中设备。"); return; }
+        var dialog = new DeviceNoteDialog(row.Nickname, row.Note) { Owner = this, Icon = Icon };
+        if (dialog.ShowDialog() != true) return;
         try
         {
-            store.SavePeerNote(row.Peer.DeviceId, PeerNoteBox.Text);
+            store.SavePeerNote(row.Peer.DeviceId, dialog.Note);
             RefreshPeersView();
-            SetStatus(PeerNoteBox.Text.Trim().Length == 0 ? "已清空本机备注。" : "备注已保存，仅本机可见。");
+            SetStatus(dialog.Note.Trim().Length == 0 ? "已清空本机备注。" : "备注已保存，仅本机可见。");
         }
         catch (Exception ex) { ShowError("保存备注失败", ex); }
-    }
-
-    private void ClearPeerNote_Click(object sender, RoutedEventArgs e)
-    {
-        if (PeersGrid.SelectedItem is not PeerRow row) { SetStatus("请先选中设备。"); return; }
-        try
-        {
-            store.SavePeerNote(row.Peer.DeviceId, "");
-            PeerNoteBox.Text = "";
-            RefreshPeersView();
-            SetStatus("已清空本机备注。");
-        }
-        catch (Exception ex) { ShowError("清空备注失败", ex); }
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
@@ -809,9 +758,11 @@ public partial class MainWindow : Window
         if (LocalGrid.SelectedItem is not LocalResourceRow row) { SetStatus("请先选中已发布的资源。"); return; }
         try
         {
-            store.SetResourceNote(row.Resource.Id, LocalNoteBox.Text);
+            var text = LocalNoteBox.Text;
+            store.SetResourceNote(row.Resource.Id, text);
             RefreshLocalView();
-            SetStatus(LocalNoteBox.Text.Trim().Length == 0 ? "已清空资源备注。" : "资源备注已保存，对方刷新目录后可见。");
+            LocalNoteBox.Text = "";
+            SetStatus(string.IsNullOrWhiteSpace(text) ? "已清空资源备注。" : "资源备注已保存，对方刷新目录后可见。");
         }
         catch (Exception ex) { ShowError("保存资源备注失败", ex); }
     }
@@ -829,31 +780,44 @@ public partial class MainWindow : Window
         catch (Exception ex) { ShowError("清空资源备注失败", ex); }
     }
 
-    private void SendReminder_Click(object sender, RoutedEventArgs e)
+    private void SendReminderRow_Click(object sender, RoutedEventArgs e)
     {
-        if (LocalGrid.SelectedItem is not LocalResourceRow row) { SetStatus("请先选中已发布的资源。"); return; }
+        if (sender is not FrameworkElement element || element.DataContext is not LocalResourceRow row) return;
         if (row.Status != "可用") { SetStatus("资源原文件当前不可用，无法发送提醒。"); return; }
-        var candidates = Peers.Where(item => item.Status == "在线" &&
-                peerCapabilities.GetValueOrDefault(item.Peer.DeviceId, [])
-                    .Contains(NodeDefaults.ReminderCapability, StringComparer.Ordinal))
-            .Select(item => item.Peer).ToArray();
-        if (candidates.Length == 0) { SetStatus("当前没有支持定向提醒的在线设备。"); return; }
-        var dialog = new SendReminderDialog($"{row.Name}（{row.Kind} · {row.Size}）", candidates) { Owner = this, Icon = Icon };
-        if (dialog.ShowDialog() != true || dialog.SelectedPeer is null) return;
-        SendReminderAsync(dialog.SelectedPeer, row.Resource);
+        var notes = store.GetPeerNotes();
+        var targets = store.GetPeers().Select(peer => new ReminderTarget(peer,
+                peerStatus.GetValueOrDefault(peer.DeviceId, "未检查"),
+                peerCapabilities.GetValueOrDefault(peer.DeviceId, [])
+                    .Contains(NodeDefaults.ReminderCapability, StringComparer.Ordinal),
+                notes.GetValueOrDefault(peer.DeviceId, "")))
+            .ToArray();
+        if (targets.Length == 0) { SetStatus("本机还没有设备记录，请先在设备页连接设备。"); return; }
+        var dialog = new SendReminderDialog($"{row.Name}（{row.Kind} · {row.Size}）", targets) { Owner = this, Icon = Icon };
+        if (dialog.ShowDialog() != true || dialog.SelectedPeers.Count == 0) return;
+        SendReminderAsync(row.Resource, dialog.SelectedPeers);
     }
 
-    private async void SendReminderAsync(PeerInfo peer, LocalResource resource)
+    private async void SendReminderAsync(LocalResource resource, IReadOnlyList<PeerInfo> targets)
     {
-        try
+        var settings = store.GetSettings();
+        var sent = 0;
+        var failures = new List<string>();
+        foreach (var peer in targets)
         {
-            var settings = store.GetSettings();
-            var request = new ResourceReminderRequest(NodeDefaults.ReminderCapability, Guid.NewGuid().ToString("N"),
-                settings.Profile.DeviceId, resource.Id, resource.Name, resource.Kind, resource.Note, DateTimeOffset.UtcNow);
-            var receipt = await client.SendReminderAsync(peer, request);
-            SetStatus(receipt.Accepted ? $"提醒已送达 {peer.Nickname}。" : $"提醒未送达：{receipt.Reason}");
+            try
+            {
+                var request = new ResourceReminderRequest(NodeDefaults.ReminderCapability, Guid.NewGuid().ToString("N"),
+                    settings.Profile.DeviceId, resource.Id, resource.Name, resource.Kind, resource.Note, DateTimeOffset.UtcNow);
+                var receipt = await client.SendReminderAsync(peer, request);
+                if (receipt.Accepted) sent++;
+                else failures.Add($"{peer.Nickname}：{receipt.Reason}");
+            }
+            catch (Exception ex) { failures.Add($"{peer.Nickname}：{ex.Message}"); }
         }
-        catch (Exception ex) { ShowError("发送提醒失败", ex); }
+        if (failures.Count == 0) SetStatus($"提醒已送达 {sent} 台设备。");
+        else System.Windows.MessageBox.Show(
+            $"已送达 {sent} 台设备，{failures.Count} 台失败：\n\n{string.Join("\n", failures)}",
+            "发送提醒结果", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     private void ShowReminder(ReminderDelivery delivery)
@@ -1322,7 +1286,8 @@ public sealed record PeerRow(PeerInfo Peer, string Status, ImageSource? Avatar, 
     public string Nickname => Peer.Nickname;
     public string Ip => Peer.Ip;
     public string Address => $"{Peer.Ip}:{Peer.Port}";
-    public string NoteText => string.IsNullOrEmpty(Note) ? "" : $"备注：{Note}";
+    public string Title => string.IsNullOrEmpty(Note) ? Nickname : Note;
+    public string NicknamePrefix => string.IsNullOrEmpty(Note) ? "" : $"{Nickname}  ·  ";
 }
 
 public sealed record GatewayRow(GatewayInfo Gateway, string Name, string WanIp, string PortRange, string Status);
@@ -1334,6 +1299,7 @@ public sealed record ResourceRow(RemoteResource Resource, string Name, string Ki
 public sealed record LocalResourceRow(LocalResource Resource, string Name, string Kind, string Mode, string Size, string Status, string Path, string Note)
 {
     public string NoteText => string.IsNullOrEmpty(Note) ? "" : $"备注：{Note}";
+    public bool CanRemind => Status == "可用";
 }
 public sealed record FavoriteRow(Favorite Favorite, string Name, string PeerName, string Kind, string Status, string Note)
 {
