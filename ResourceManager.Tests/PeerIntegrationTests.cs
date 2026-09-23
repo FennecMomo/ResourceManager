@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Diagnostics;
+using System.Security.Cryptography;
 using ResourceManager.Core;
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
@@ -8,6 +10,39 @@ namespace ResourceManager.Tests;
 
 public sealed class PeerIntegrationTests
 {
+    [Fact]
+    public async Task PublishedResourceManagerExecutable_BecomesVerifiedLocalUpdateSource()
+    {
+        using var space = new TestSpace();
+        var receiver = new NodeStore(space.PathFor("receiver"));
+        var publisher = new NodeStore(space.PathFor("publisher"));
+        var publishedPath = space.PathFor("published", "ResourceManager.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(publishedPath)!);
+        File.Copy(Environment.ProcessPath!, publishedPath);
+        var published = publisher.AddResource(publishedPath, PublishMode.Reference);
+        publisher.AddResource(space.Write("ResourceManager-not-an-update.txt", "ignore"), PublishMode.Reference);
+        var port = FreePort();
+        publisher.SaveSettings("发布更新的电脑", null, port, true);
+        await using var node = new PeerNode(publisher);
+        await node.StartAsync(port, "127.0.0.1");
+        using var client = new PeerClient(receiver);
+        var peer = await client.ConnectAsync("127.0.0.1", port);
+
+        var update = await client.GetSharedUpdateAsync(peer);
+
+        Assert.NotNull(update);
+        Assert.Equal(published.Id, update.ResourceId);
+        var fileVersion = FileVersionInfo.GetVersionInfo(publishedPath);
+        Assert.StartsWith(update.Version, fileVersion.ProductVersion!, StringComparison.Ordinal);
+        Assert.Equal(new FileInfo(publishedPath).Length, update.Size);
+        await using (var source = File.OpenRead(publishedPath))
+            Assert.Equal(Convert.ToHexString(await SHA256.HashDataAsync(source)).ToLowerInvariant(), update.Sha256);
+
+        using var updateClient = new UpdateClient(receiver.DataDirectory);
+        var downloaded = await updateClient.DownloadAsync(update, peer, client);
+        Assert.Equal(File.ReadAllBytes(publishedPath), File.ReadAllBytes(downloaded));
+    }
+
     [Fact]
     public async Task LanDiscovery_FindsAnotherRunningDevice()
     {

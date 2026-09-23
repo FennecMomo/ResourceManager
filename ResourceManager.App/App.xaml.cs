@@ -61,7 +61,13 @@ public partial class App : System.Windows.Application
 
     private static async Task<int> ApplyUpdateAsync(string[] args)
     {
-        if (args.Length != 3 || args[2] is not ("restart" or "no-restart")) return 2;
+        if (args.Length is not (3 or 4) || args[2] is not ("restart" or "no-restart")) return 2;
+        int? parentProcessId = null;
+        if (args.Length == 4)
+        {
+            if (!int.TryParse(args[3], out var parsedProcessId) || parsedProcessId <= 0) return 2;
+            parentProcessId = parsedProcessId;
+        }
         var target = Path.GetFullPath(args[0]);
         var expectedHash = args[1].ToLowerInvariant();
         var staged = Environment.ProcessPath is null ? "" : Path.GetFullPath(Environment.ProcessPath);
@@ -71,6 +77,24 @@ public partial class App : System.Windows.Application
             var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream)).ToLowerInvariant();
             if (actual != expectedHash) return 3;
         }
+        if (parentProcessId is int processId)
+        {
+            try
+            {
+                using var parent = Process.GetProcessById(processId);
+                using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+                await parent.WaitForExitAsync(timeout.Token);
+            }
+            catch (ArgumentException)
+            {
+                // The original process completed before the updater began waiting.
+            }
+            catch (OperationCanceledException)
+            {
+                return 5;
+            }
+        }
+        if (!await SingleInstanceCoordinator.WaitForPrimaryExitAsync(TimeSpan.FromMinutes(2))) return 5;
         var temporary = Path.Combine(Path.GetDirectoryName(target)!, ".ResourceManager-update.tmp");
         try
         {

@@ -941,31 +941,96 @@ public partial class MainWindow : Window
             CheckUpdateButton.IsEnabled = true;
             return;
         }
-        UpdateStatusText.Text = "正在检查 GitHub 上的最新版本…";
+        UpdateStatusText.Text = "正在检查 GitHub 和已连接设备上的最新版本…";
         try
         {
-            var latest = await updateClient.GetLatestAsync(updateCancellation.Token);
-            if (latest is null)
+            var localTask = FindLocalUpdatesAsync(updateCancellation.Token);
+            AppUpdate? github = null;
+            Exception? githubError = null;
+            try { github = await updateClient.GetLatestAsync(updateCancellation.Token); }
+            catch (OperationCanceledException) when (exiting) { throw; }
+            catch (Exception ex) { githubError = ex; }
+            var localUpdates = await localTask;
+            var local = localUpdates.FirstOrDefault();
+            if (github is null && local is null)
             {
+                if (githubError is not null) throw new InvalidOperationException(
+                    "GitHub 检查失败，已连接设备也没有可用的本地更新源。", githubError);
                 UpdateStatusText.Text = "尚未发布可供更新的版本。";
-                if (manual) SetStatus("GitHub 尚未发布安装包。");
+                if (manual) SetStatus("GitHub 和已连接设备均未发布安装包。");
                 return;
             }
             var current = UpdateClient.ParseVersion(AppVersion);
-            if (latest.Version <= current)
+            if (githubError is not null && (local is null || local.Version <= current))
+                throw new InvalidOperationException("GitHub 检查失败，已连接设备没有发布更高版本。", githubError);
+            var latestVersion = github?.Version;
+            if (local is not null && (latestVersion is null || local.Version > latestVersion))
+                latestVersion = local.Version;
+            if (latestVersion is null || latestVersion <= current)
             {
                 UpdateStatusText.Text = $"当前已是最新版本 v{AppVersion}";
                 if (manual) SetStatus("当前已是最新版本。");
                 return;
             }
-            UpdateStatusText.Text = $"发现 v{latest.Version}，正在下载并校验…";
+
+            var localSource = localUpdates.FirstOrDefault(item => item.Version == latestVersion &&
+                (github?.Version != latestVersion ||
+                 string.Equals(item.Package.Sha256, github.Sha256, StringComparison.OrdinalIgnoreCase)));
+            var githubSource = github?.Version == latestVersion ? github : null;
+            var sourceName = localSource is null ? "GitHub" : $"“{localSource.Peer.Nickname}”的本地源";
+            if (localSource is not null && githubSource is null)
+            {
+                var acceptUnconfirmedLocal = manual && System.Windows.MessageBox.Show(
+                    $"{sourceName}发布了新版 v{latestVersion}，但 GitHub 当前无法确认这个版本的官方 SHA-256。\n\n仅当你信任该设备和它发布的程序时继续。是否下载？",
+                    "确认本地更新源", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+                if (!acceptUnconfirmedLocal && github is not null && github.Version > current)
+                {
+                    latestVersion = github.Version;
+                    githubSource = github;
+                    localSource = localUpdates.FirstOrDefault(item => item.Version == github.Version &&
+                        string.Equals(item.Package.Sha256, github.Sha256, StringComparison.OrdinalIgnoreCase));
+                    sourceName = localSource is null ? "GitHub" : $"“{localSource.Peer.Nickname}”的本地源";
+                }
+                else if (!acceptUnconfirmedLocal)
+                {
+                    UpdateStatusText.Text = manual
+                        ? $"已取消从{sourceName}下载 v{latestVersion}。"
+                        : $"{sourceName}发布了 v{latestVersion}；请手动检查并确认此来源。";
+                    return;
+                }
+            }
+            UpdateStatusText.Text = $"发现 v{latestVersion}，正从{sourceName}下载并校验…";
             var progress = new Progress<long>(bytes => UpdateStatusText.Text =
-                $"正在下载 v{latest.Version} · {bytes * 100d / latest.Size:0}%");
-            var package = await updateClient.DownloadAsync(latest, progress, updateCancellation.Token);
-            stagedUpdate = new StagedUpdate(package, latest.Sha256, latest.Version.ToString());
-            UpdateStatusText.Text = $"v{latest.Version} 已下载并校验，退出后安装。";
+                $"正从{sourceName}下载 v{latestVersion} · {bytes * 100d / (localSource?.Package.Size ?? githubSource!.Size):0}%");
+            string package;
+            string packageHash;
+            if (localSource is not null)
+            {
+                try
+                {
+                    package = await updateClient.DownloadAsync(localSource.Package, localSource.Peer, client,
+                        progress, updateCancellation.Token);
+                    packageHash = localSource.Package.Sha256;
+                }
+                catch (Exception ex) when (githubSource is not null && ex is not OperationCanceledException)
+                {
+                    sourceName = "GitHub（本地源不可用，已回退）";
+                    UpdateStatusText.Text = $"本地源下载失败，正从 GitHub 下载 v{latestVersion}…";
+                    progress = new Progress<long>(bytes => UpdateStatusText.Text =
+                        $"正从 GitHub 下载 v{latestVersion} · {bytes * 100d / githubSource.Size:0}%");
+                    package = await updateClient.DownloadAsync(githubSource, progress, updateCancellation.Token);
+                    packageHash = githubSource.Sha256;
+                }
+            }
+            else
+            {
+                package = await updateClient.DownloadAsync(githubSource!, progress, updateCancellation.Token);
+                packageHash = githubSource!.Sha256;
+            }
+            stagedUpdate = new StagedUpdate(package, packageHash, latestVersion.ToString());
+            UpdateStatusText.Text = $"v{latestVersion} 已从{sourceName}下载并校验，退出后安装。";
             if (manual && System.Windows.MessageBox.Show(
-                    $"新版 v{latest.Version} 已准备好。\n\n现在退出共享、安装更新并重新启动吗？",
+                    $"新版 v{latestVersion} 已准备好（来源：{sourceName}）。\n\n现在退出共享、安装更新并重新启动吗？",
                     "资源管理器更新", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
             {
                 restartAfterUpdate = true;
@@ -983,6 +1048,27 @@ public partial class MainWindow : Window
             checkingUpdate = false;
             CheckUpdateButton.IsEnabled = true;
         }
+    }
+
+    private async Task<IReadOnlyList<LocalUpdateCandidate>> FindLocalUpdatesAsync(CancellationToken cancellationToken)
+    {
+        var tasks = store.GetPeers().Select(async peer =>
+        {
+            try
+            {
+                var package = await client.GetSharedUpdateAsync(peer, cancellationToken);
+                if (package is null) return null;
+                var version = UpdateClient.ParseVersion(package.Version);
+                if (string.IsNullOrWhiteSpace(package.ResourceId) || package.ResourceId.Length > 100 ||
+                    package.Size is <= 0 or > UpdateClient.MaxPackageBytes || package.Sha256.Length != 64 ||
+                    package.Sha256.Any(character => !Uri.IsHexDigit(character))) return null;
+                return new LocalUpdateCandidate(peer, package, version);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch { return null; }
+        }).ToArray();
+        var results = await Task.WhenAll(tasks);
+        return results.OfType<LocalUpdateCandidate>().OrderByDescending(item => item.Version).ToArray();
     }
 
     private async void SaveSettings_Click(object sender, RoutedEventArgs e)
@@ -1082,7 +1168,8 @@ public partial class MainWindow : Window
                     ArgumentList =
                     {
                         "--apply-update", Environment.ProcessPath, stagedUpdate.Sha256,
-                        restartAfterUpdate ? "restart" : "no-restart"
+                        restartAfterUpdate ? "restart" : "no-restart",
+                        Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     }
                 });
             }
@@ -1093,6 +1180,7 @@ public partial class MainWindow : Window
 }
 
 internal sealed record StagedUpdate(string PackagePath, string Sha256, string Version);
+internal sealed record LocalUpdateCandidate(PeerInfo Peer, SharedUpdatePackage Package, Version Version);
 
 internal sealed class ActiveDownload(CancellationTokenSource cancellation)
 {

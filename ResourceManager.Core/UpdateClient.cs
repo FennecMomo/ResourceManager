@@ -77,19 +77,45 @@ public sealed class UpdateClient : IDisposable
 
     public async Task<string> DownloadAsync(AppUpdate update, IProgress<long>? progress = null, CancellationToken cancellationToken = default)
     {
+        return await DownloadPackageAsync(update.Version, update.Size, update.Sha256,
+            async token =>
+            {
+                using var request = CreateRequest(update.DownloadUrl);
+                return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token)
+                    .ConfigureAwait(false);
+            }, progress, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<string> DownloadAsync(SharedUpdatePackage update, PeerInfo peer, PeerClient peerClient,
+        IProgress<long>? progress = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(update.ResourceId) || update.ResourceId.Length > 100)
+            throw new InvalidDataException("本地更新源的资源编号无效。");
+        var version = ParseVersion(update.Version);
+        return await DownloadPackageAsync(version, update.Size, update.Sha256,
+            token => peerClient.OpenFileAsync(peer, update.ResourceId, "", 0, null, token),
+            progress, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<string> DownloadPackageAsync(Version version, long size, string sha256,
+        Func<CancellationToken, Task<HttpResponseMessage>> openResponse,
+        IProgress<long>? progress, CancellationToken cancellationToken)
+    {
+        if (size is <= 0 or > MaxPackageBytes) throw new InvalidDataException("更新包大小无效。");
+        if (!Regex.IsMatch(sha256, "^[0-9a-fA-F]{64}$")) throw new InvalidDataException("更新包校验值无效。");
+        sha256 = sha256.ToLowerInvariant();
         Directory.CreateDirectory(updateDirectory);
-        var destination = Path.Combine(updateDirectory, $"ResourceManager-{update.Version}-{update.Sha256[..12]}.exe");
-        if (File.Exists(destination) && new FileInfo(destination).Length == update.Size &&
-            await HashFileAsync(destination, cancellationToken) == update.Sha256)
+        var destination = Path.Combine(updateDirectory, $"ResourceManager-{version}-{sha256[..12]}.exe");
+        if (File.Exists(destination) && new FileInfo(destination).Length == size &&
+            await HashFileAsync(destination, cancellationToken) == sha256)
             return destination;
 
         var temporary = Path.Combine(updateDirectory, Guid.NewGuid().ToString("N") + ".download");
         try
         {
-            using var request = CreateRequest(update.DownloadUrl);
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await openResponse(cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength is long contentLength && contentLength != update.Size)
+            if (response.Content.Headers.ContentLength is long contentLength && contentLength != size)
                 throw new InvalidDataException("更新包大小与发布资料不符。");
             await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
             await using var target = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
@@ -101,14 +127,15 @@ public sealed class UpdateClient : IDisposable
             while ((read = await source.ReadAsync(chunk, cancellationToken)) != 0)
             {
                 written += read;
-                if (written > update.Size) throw new InvalidDataException("更新包超过预期大小。");
+                if (written > size) throw new InvalidDataException("更新包超过预期大小。");
                 hash.AppendData(chunk, 0, read);
                 await target.WriteAsync(chunk.AsMemory(0, read), cancellationToken);
                 progress?.Report(written);
             }
             await target.FlushAsync(cancellationToken);
-            if (written != update.Size || Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant() != update.Sha256)
+            if (written != size || Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant() != sha256)
                 throw new InvalidDataException("更新包校验失败，未安装更新。");
+            await target.DisposeAsync();
             await using (var check = File.OpenRead(temporary))
             {
                 if (check.ReadByte() != 'M' || check.ReadByte() != 'Z')

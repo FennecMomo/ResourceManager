@@ -24,6 +24,31 @@ internal sealed class SingleInstanceCoordinator : IDisposable
 
     public bool IsPrimary => ownsMutex;
 
+    public static async Task<bool> WaitForPrimaryExitAsync(TimeSpan timeout)
+    {
+        return await Task.Run(() =>
+        {
+            Mutex? existing = null;
+            var acquired = false;
+            try
+            {
+                existing = Mutex.OpenExisting(InstanceName);
+                try { acquired = existing.WaitOne(timeout); }
+                catch (AbandonedMutexException) { acquired = true; }
+                return acquired;
+            }
+            catch (WaitHandleCannotBeOpenedException)
+            {
+                return true;
+            }
+            finally
+            {
+                if (acquired) existing?.ReleaseMutex();
+                existing?.Dispose();
+            }
+        }).ConfigureAwait(false);
+    }
+
     public void StartListening(Action activate)
     {
         ObjectDisposedException.ThrowIf(disposed, this);

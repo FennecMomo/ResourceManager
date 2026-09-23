@@ -169,6 +169,39 @@
                 <Setter.Value><ControlTemplate TargetType="TabControl"><ContentPresenter ContentSource="SelectedContent"/></ControlTemplate></Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="ConnectionTabItem" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="TabBorder" Background="Transparent" CornerRadius="8" Padding="14,8">
+                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="TabBorder" Property="Background" Value="#F1F5FB"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="TabBorder" Property="Background" Value="#EAF2FF"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="TabBorder" Property="BorderBrush" Value="{StaticResource Accent}"/><Setter TargetName="TabBorder" Property="BorderThickness" Value="1"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ConnectionTabControl" TargetType="TabControl">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <TabPanel IsItemsHost="True" KeyboardNavigation.TabIndex="1"/>
+                            <ContentPresenter Grid.Row="1" ContentSource="SelectedContent" Margin="0,17,0,0"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid>
@@ -220,53 +253,49 @@
                 <TabItem Header="设备">
                     <Grid Margin="28,23,28,22">
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="18"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                        <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <Border Style="{StaticResource Card}">
-                                <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                    <Grid Margin="0,0,0,15">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="连接一台电脑" Style="{StaticResource CardHeading}"/>
-                                            <TextBlock Text="输入地址，或查找同一局域网内正在运行的设备。" Style="{StaticResource Caption}" Margin="0,4,0,0"/>
-                                        </StackPanel>
-                                        <Button x:Name="DiscoverPeersButton" Grid.Column="1" Content="查找局域网" Click="DiscoverPeers_Click" Style="{StaticResource SecondaryButton}"/>
+                        <Border Style="{StaticResource Card}">
+                            <TabControl Style="{StaticResource ConnectionTabControl}" MinHeight="148">
+                                <TabItem Header="直接连接" Style="{StaticResource ConnectionTabItem}">
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <Grid Margin="0,0,0,14">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="输入设备地址，或查找同一局域网内正在运行的设备。" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
+                                            <Button x:Name="DiscoverPeersButton" Grid.Column="1" Content="查找局域网" Click="DiscoverPeers_Click" Style="{StaticResource SecondaryButton}"/>
+                                        </Grid>
+                                        <Grid Grid.Row="1">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Margin="0,0,12,0"><TextBlock Text="IP 地址" Style="{StaticResource Caption}" Margin="0,0,0,5"/><TextBox x:Name="PeerIpBox" ToolTip="例如 192.168.1.20"/></StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="端口" Style="{StaticResource Caption}" Margin="0,0,0,5"/><TextBox x:Name="PeerPortBox" Text="37642"/></StackPanel>
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom"><Button Content="连接" Click="Connect_Click" Margin="0,0,6,0"/><Button x:Name="UpdateAddressButton" Content="更新地址" Click="UpdateAddress_Click" Style="{StaticResource SecondaryButton}" ToolTip="选择设备后更新地址" IsEnabled="False"/></StackPanel>
+                                        </Grid>
                                     </Grid>
-                                    <Grid Grid.Row="1">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="90"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" Margin="0,0,10,0"><TextBlock Text="IP 地址" Style="{StaticResource Caption}" Margin="0,0,0,5"/><TextBox x:Name="PeerIpBox" ToolTip="例如 192.168.1.20"/></StackPanel>
-                                        <StackPanel Grid.Column="1" Margin="0,0,10,0"><TextBlock Text="端口" Style="{StaticResource Caption}" Margin="0,0,0,5"/><TextBox x:Name="PeerPortBox" Text="37642"/></StackPanel>
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom"><Button Content="连接" Click="Connect_Click" Margin="0,0,6,0"/><Button x:Name="UpdateAddressButton" Content="更新" Click="UpdateAddress_Click" Style="{StaticResource SecondaryButton}" ToolTip="选择设备后更新地址" IsEnabled="False"/></StackPanel>
+                                </TabItem>
+                                <TabItem Header="路由器入口" Style="{StaticResource ConnectionTabItem}">
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,12,0"><TextBlock Text="入口名称" Style="{StaticResource Caption}" Margin="0,0,0,5"/><TextBox x:Name="GatewayNameBox" ToolTip="名称，例如办公室华为路由器"/></StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="路由器 WAN IPv4（扫描 48001–48099）" Style="{StaticResource Caption}" Margin="0,0,0,5"/><TextBox x:Name="GatewayIpBox" ToolTip="路由器外部入口，例如 192.168.2.20"/></StackPanel>
+                                            <TextBlock Grid.Column="2" Text="受信网络" Foreground="#9B6A12" Background="#FFF4D9" Padding="8,4" VerticalAlignment="Bottom" Margin="0,0,0,7"/>
+                                        </Grid>
+                                        <Grid Grid.Row="1" Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <ListBox x:Name="GatewayList" ItemsSource="{Binding Gateways}" SelectionChanged="GatewayList_SelectionChanged" Height="52" Padding="0" BorderThickness="0" Background="Transparent">
+                                                <ListBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Name}" Style="{StaticResource ItemTitle}"/><TextBlock Style="{StaticResource Meta}" Margin="0,3,0,0"><Run Text="{Binding WanIp}"/><Run Text=" · "/><Run Text="{Binding Status}"/></TextBlock></StackPanel></DataTemplate></ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                                                <Button x:Name="GatewayAddButton" Content="添加并扫描" Click="AddGateway_Click" Padding="12,0" Margin="0,0,6,0"/>
+                                                <Button x:Name="GatewaySaveButton" Content="保存" Click="SaveGatewayAddress_Click" Style="{StaticResource SecondaryButton}" Padding="12,0" Margin="0,0,6,0"/>
+                                                <Button x:Name="GatewayRefreshButton" Content="刷新" Click="RefreshGateway_Click" Style="{StaticResource SecondaryButton}" Padding="12,0" Margin="0,0,6,0"/>
+                                                <Button x:Name="GatewayRemoveButton" Content="移除" Click="RemoveGateway_Click" Style="{StaticResource QuietButton}" Padding="10,0"/>
+                                            </StackPanel>
+                                            <TextBlock x:Name="GatewayProgressText" Grid.ColumnSpan="2" Text="未添加路由器入口" Visibility="Collapsed"/>
+                                        </Grid>
                                     </Grid>
-                                </Grid>
-                            </Border>
-                            <Border Grid.Column="2" Style="{StaticResource Card}">
-                                <Grid>
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                    <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <StackPanel><TextBlock Text="路由器入口" Style="{StaticResource CardHeading}"/><TextBlock Text="手动填写路由器 WAN IPv4，仅扫描 48001–48099" Style="{StaticResource Caption}" Margin="0,4,0,0"/></StackPanel>
-                                        <TextBlock Grid.Column="1" Text="受信网络" Foreground="#9B6A12" Background="#FFF4D9" Padding="8,4" VerticalAlignment="Top"/>
-                                    </Grid>
-                                    <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                        <TextBox x:Name="GatewayNameBox" Margin="0,0,8,0" ToolTip="名称，例如办公室华为路由器"/>
-                                        <TextBox x:Name="GatewayIpBox" Grid.Column="1" ToolTip="路由器外部入口，例如 192.168.2.20"/>
-                                    </Grid>
-                                    <Grid Grid.Row="2" Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <ListBox x:Name="GatewayList" ItemsSource="{Binding Gateways}" SelectionChanged="GatewayList_SelectionChanged" Height="52" Padding="0" BorderThickness="0" Background="Transparent">
-                                            <ListBox.ItemTemplate><DataTemplate><StackPanel><TextBlock Text="{Binding Name}" Style="{StaticResource ItemTitle}"/><TextBlock Style="{StaticResource Meta}" Margin="0,3,0,0"><Run Text="{Binding WanIp}"/><Run Text=" · "/><Run Text="{Binding Status}"/></TextBlock></StackPanel></DataTemplate></ListBox.ItemTemplate>
-                                        </ListBox>
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
-                                            <Button x:Name="GatewayAddButton" Content="添加并扫描" Click="AddGateway_Click" Padding="10,0" Margin="0,0,5,0"/>
-                                            <Button x:Name="GatewaySaveButton" Content="保存" Click="SaveGatewayAddress_Click" Style="{StaticResource SecondaryButton}" Padding="10,0" Margin="0,0,5,0"/>
-                                            <Button x:Name="GatewayRefreshButton" Content="刷新" Click="RefreshGateway_Click" Style="{StaticResource SecondaryButton}" Padding="10,0" Margin="0,0,5,0"/>
-                                            <Button x:Name="GatewayRemoveButton" Content="移除" Click="RemoveGateway_Click" Style="{StaticResource QuietButton}" Padding="8,0"/>
-                                        </StackPanel>
-                                        <TextBlock x:Name="GatewayProgressText" Grid.ColumnSpan="2" Text="未添加路由器入口" Visibility="Collapsed"/>
-                                    </Grid>
-                                </Grid>
-                            </Border>
-                        </Grid>
+                                </TabItem>
+                            </TabControl>
+                        </Border>
                         <Grid Grid.Row="2">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="320"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <Border Grid.Column="0" Style="{StaticResource Card}">
@@ -390,7 +419,7 @@
                             <StackPanel Orientation="Horizontal" Margin="0,18,0,0"><Button x:Name="CopyRouterWanButton" Content="复制外部入口 IP" Click="CopyRouterWan_Click" IsEnabled="False" Margin="0,0,8,0"/><Button x:Name="RemoveRouterMappingButton" Content="删除本机外部映射" Click="RemoveRouterMapping_Click" Style="{StaticResource DangerButton}" IsEnabled="False"/></StackPanel>
                         </StackPanel></Border>
                         <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
-                            <TextBlock Text="软件更新" Style="{StaticResource PageHeading}"/><TextBlock Text="从项目的 GitHub Release 下载并校验官方更新包。" Style="{StaticResource Caption}" Margin="0,5,0,22"/>
+                            <TextBlock Text="软件更新" Style="{StaticResource PageHeading}"/><TextBlock Text="从 GitHub 或已连接设备发布的 ResourceManager 程序下载更新；安装前会核对版本、大小和 SHA-256。" Style="{StaticResource Caption}" Margin="0,5,0,22" TextWrapping="Wrap"/>
                             <CheckBox x:Name="AutoUpdateBox" Content="启动后自动检查更新" FontSize="13" Foreground="{StaticResource Ink}" Margin="0,0,0,12"/>
                             <StackPanel Orientation="Horizontal"><Button x:Name="CheckUpdateButton" Content="检查更新" Click="CheckUpdate_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/><TextBlock x:Name="UpdateStatusText" Text="当前版本" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/></StackPanel>
                         </StackPanel></Border>

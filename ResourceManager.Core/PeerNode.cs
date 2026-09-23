@@ -75,6 +75,11 @@ public sealed class PeerNode : IAsyncDisposable
             return Results.Ok(Self());
         });
         instance.MapGet("/api/v1/resources", () => Results.Ok(catalog.List()));
+        instance.MapGet("/api/v1/updates/latest", async (CancellationToken token) =>
+        {
+            var update = await catalog.FindLatestUpdateAsync(token).ConfigureAwait(false);
+            return update is null ? Results.NotFound() : Results.Ok(update);
+        });
         instance.MapGet("/api/v1/resources/{id}/tree", (string id) =>
         {
             try { return Results.Ok(catalog.ListFiles(id)); }
@@ -144,6 +149,7 @@ public sealed class PeerNode : IAsyncDisposable
 public sealed class PeerClient(NodeStore store) : IDisposable
 {
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    private readonly HttpClient updateHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private static Uri Base(string ip, int port)
@@ -239,6 +245,17 @@ public sealed class PeerClient(NodeStore store) : IDisposable
                    .ConfigureAwait(false) ?? [];
     }
 
+    public async Task<SharedUpdatePackage?> GetSharedUpdateAsync(PeerInfo peer,
+        CancellationToken cancellationToken = default)
+    {
+        await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        using var response = await updateHttp.GetAsync(Route(peer, "updates/latest"), cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<SharedUpdatePackage>(Json, cancellationToken)
+            .ConfigureAwait(false) ?? throw new InvalidDataException("对方未返回本地更新源资料。");
+    }
+
     public async Task<IReadOnlyList<RemoteFile>> GetFilesAsync(PeerInfo peer, string resourceId,
         CancellationToken cancellationToken = default)
     {
@@ -263,5 +280,9 @@ public sealed class PeerClient(NodeStore store) : IDisposable
         return http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
     }
 
-    public void Dispose() => http.Dispose();
+    public void Dispose()
+    {
+        http.Dispose();
+        updateHttp.Dispose();
+    }
 }

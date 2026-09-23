@@ -1,8 +1,67 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+
 namespace ResourceManager.Core;
 
 public sealed class ResourceCatalog(NodeStore store)
 {
+    private static readonly Regex UpdateFileName = new(
+        @"^ResourceManager(?:[-_ ]v?\d+\.\d+\.\d+)?\.exe$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex ProductVersionPrefix = new(
+        @"^(?<version>\d+\.\d+\.\d+)(?:[+-]|$)", RegexOptions.CultureInvariant);
+    private readonly SemaphoreSlim updateInspection = new(1, 1);
+    private string? cachedUpdateKey;
+    private SharedUpdatePackage? cachedUpdate;
+
     public IReadOnlyList<RemoteResource> List() => store.GetResources().Select(Describe).ToList();
+
+    public async Task<SharedUpdatePackage?> FindLatestUpdateAsync(CancellationToken cancellationToken = default)
+    {
+        var candidates = new List<(LocalResource Resource, FileInfo File, Version Version)>();
+        foreach (var resource in store.GetResources())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (resource.Kind != ResourceKind.File || !UpdateFileName.IsMatch(resource.Name)) continue;
+            try
+            {
+                var file = new FileInfo(resource.SourcePath);
+                if (!file.Exists || file.Length is <= 0 or > UpdateClient.MaxPackageBytes) continue;
+                var info = FileVersionInfo.GetVersionInfo(file.FullName);
+                var productVersion = ProductVersionPrefix.Match(info.ProductVersion ?? "").Groups["version"].Value;
+                var version = productVersion.Length > 0 && Version.TryParse(productVersion, out var parsed)
+                    ? parsed
+                    : new Version(info.FileMajorPart, info.FileMinorPart, info.FileBuildPart);
+                if (version == new Version(0, 0, 0)) continue;
+                candidates.Add((resource, file, version));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                // A published file can disappear or change while the catalog is being inspected.
+            }
+        }
+
+        var latest = candidates.OrderByDescending(item => item.Version).FirstOrDefault();
+        if (latest.Resource is null) return null;
+        var cacheKey = $"{latest.Resource.Id}\0{latest.File.FullName}\0{latest.File.Length}\0{latest.File.LastWriteTimeUtc.Ticks}";
+        await updateInspection.WaitAsync(cancellationToken);
+        try
+        {
+            if (cacheKey == cachedUpdateKey) return cachedUpdate;
+            await using var stream = new FileStream(latest.File.FullName, FileMode.Open, FileAccess.Read,
+                FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+            latest.File.Refresh();
+            if (!latest.File.Exists || latest.File.Length != stream.Length)
+                throw new IOException("本地更新源在生成校验信息时发生了变化。");
+            cachedUpdate = new SharedUpdatePackage(latest.Resource.Id, latest.Version.ToString(3), latest.File.Length,
+                hash, latest.File.LastWriteTimeUtc);
+            cachedUpdateKey = cacheKey;
+            return cachedUpdate;
+        }
+        finally { updateInspection.Release(); }
+    }
 
     public RemoteResource Describe(LocalResource resource)
     {
