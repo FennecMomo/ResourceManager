@@ -4,9 +4,10 @@ using ResourceManager.Core;
 
 namespace ResourceManager.App;
 
-public sealed record ReminderTarget(PeerInfo Peer, string Status, bool SupportsReminder, string Note)
+public sealed record ReminderTarget(PeerInfo Peer, string Status, bool SupportsReminder, bool SupportsChat, string Note)
 {
-    public string Detail => !SupportsReminder ? "版本不支持提醒" : Status;
+    public string Detail => SupportsChat ? $"{Status} · 持久资源卡片" :
+        !SupportsReminder ? "版本不支持提醒" : $"{Status} · 一次性提醒";
     public string DisplayName => string.IsNullOrEmpty(Note) ? Peer.Nickname : $"{Note}（{Peer.Nickname}）";
 }
 
@@ -47,7 +48,7 @@ public partial class SendReminderDialog : Window
         public ReminderTarget Target { get; } = target;
         public string DisplayName => Target.DisplayName;
         public string Summary => $"{Target.Peer.Ip}:{Target.Peer.Port}  ·  {Target.Detail}";
-        public bool IsSelectable => Target.SupportsReminder && Target.Status == "在线";
+        public bool IsSelectable => Target.SupportsChat || Target.SupportsReminder && Target.Status == "在线";
 
         public bool IsChecked
         {

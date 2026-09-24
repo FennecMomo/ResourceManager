@@ -21,7 +21,7 @@
         <TextBlock Text="发送给" FontSize="20" FontWeight="SemiBold" Foreground="#1B2B43"/>
         <StackPanel Grid.Row="1" Margin="0,6,0,16">
             <TextBlock x:Name="ResourceText" FontSize="13" FontWeight="SemiBold" Foreground="#1B2B43" TextTrimming="CharacterEllipsis"/>
-            <TextBlock Text="勾选要提醒的设备，可以多选。只有在线且支持提醒的设备才能送达，离线或旧版本会显示失败原因。" FontSize="12" Foreground="#708099" Margin="0,6,0,0" TextWrapping="Wrap"/>
+            <TextBlock Text="支持聊天的设备会收到一张持久资源卡片，离线时先排队；旧版设备仍发送一次性提醒，需在线。" FontSize="12" Foreground="#708099" Margin="0,6,0,0" TextWrapping="Wrap"/>
         </StackPanel>
         <ListBox x:Name="TargetList" Grid.Row="2">
             <ListBox.ItemTemplate><DataTemplate><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>

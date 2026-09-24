@@ -16,6 +16,7 @@ public sealed class PeerNode : IAsyncDisposable
     private readonly RouterDiscoveryCoordinator routerDiscovery;
     private readonly UpnpPortMappingManager mappingManager;
     private readonly ReminderService? reminders;
+    private readonly ChatService? chat;
     private readonly GitCollaborationStore gitProjects;
     private WebApplication? app;
 
@@ -26,11 +27,12 @@ public sealed class PeerNode : IAsyncDisposable
     }
 
     public PeerNode(NodeStore store, LanDiscoveryService discovery, UpnpPortMappingManager mappingManager,
-        ReminderService? reminders = null, GitCollaborationStore? gitProjects = null)
+        ReminderService? reminders = null, GitCollaborationStore? gitProjects = null, ChatService? chat = null)
     {
         this.store = store;
         this.mappingManager = mappingManager;
         this.reminders = reminders;
+        this.chat = chat;
         this.gitProjects = gitProjects ?? new GitCollaborationStore(store.DataDirectory);
         catalog = new ResourceCatalog(store);
         routerDiscovery = new RouterDiscoveryCoordinator(store, discovery, mappingManager);
@@ -42,11 +44,12 @@ public sealed class PeerNode : IAsyncDisposable
     private PeerHello Self()
     {
         var settings = store.GetSettings();
-        var capabilities = reminders is null
-            ? new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, "git-collaboration-v1" }
-            : new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability, "git-collaboration-v1" };
+        var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability,
+            "git-collaboration-v1" };
+        if (reminders is not null) capabilities.Add(NodeDefaults.ReminderCapability);
+        if (chat is not null) capabilities.Add(NodeDefaults.ChatCapability);
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
-            capabilities);
+            capabilities.ToArray());
     }
 
     public async Task StartAsync(int port, string listenAddress = "0.0.0.0", CancellationToken cancellationToken = default)
@@ -68,10 +71,15 @@ public sealed class PeerNode : IAsyncDisposable
                     return;
                 }
             }
-            if (context.Request.Path.Value == "/api/v1/reminders")
+            if (context.Request.Path.Value is "/api/v1/reminders" or "/api/v1/chat/messages")
             {
                 var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
-                if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = ReminderService.MaxBodyBytes;
+                if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = ChatService.MaxBodyBytes;
+                if (context.Request.ContentLength > ChatService.MaxBodyBytes)
+                {
+                    context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                    return;
+                }
             }
             if (context.Request.Path.Value == "/api/v1/git/sync")
             {
@@ -90,6 +98,7 @@ public sealed class PeerNode : IAsyncDisposable
             var ip = RemoteIp(context);
             store.UpsertPeer(new PeerInfo(hello.DeviceId, ip, hello.Port, hello.Nickname.Trim(), hello.Avatar,
                 DateTimeOffset.UtcNow));
+            store.SavePeerCapabilities(hello.DeviceId, hello.Capabilities);
             return Results.Ok(Self());
         });
         instance.MapGet("/api/v1/resources", () => Results.Ok(catalog.List()));
@@ -150,6 +159,15 @@ public sealed class PeerNode : IAsyncDisposable
                 return Results.Json(receipt, statusCode: receipt.StatusCode);
             });
         }
+        if (chat is not null)
+        {
+            instance.MapPost("/api/v1/chat/messages", async (ChatMessageRequest request, HttpContext context,
+                CancellationToken token) =>
+            {
+                var receipt = await chat.ReceiveAsync(request, RemoteIp(context), token).ConfigureAwait(false);
+                return Results.Json(receipt, statusCode: receipt.StatusCode);
+            });
+        }
 
         Port = port;
         try
@@ -188,7 +206,7 @@ public sealed class PeerNode : IAsyncDisposable
     }
 }
 
-public sealed class PeerClient(NodeStore store, bool supportsReminders = false) : IDisposable
+public sealed class PeerClient(NodeStore store, bool supportsReminders = false, bool supportsChat = false) : IDisposable
 {
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(8) };
     private readonly HttpClient updateHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
@@ -210,11 +228,11 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false) 
         CancellationToken cancellationToken = default, string? gatewayId = null, string source = "direct")
     {
         var settings = store.GetSettings();
-        var capabilities = supportsReminders
-            ? new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability }
-            : new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability };
+        var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability };
+        if (supportsReminders) capabilities.Add(NodeDefaults.ReminderCapability);
+        if (supportsChat) capabilities.Add(NodeDefaults.ChatCapability);
         var hello = new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort,
-            settings.Profile.Avatar, capabilities);
+            settings.Profile.Avatar, capabilities.ToArray());
         using var response = await http.PostAsJsonAsync(new Uri(Base(ip, port), "hello"), hello, Json, cancellationToken)
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -228,6 +246,7 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false) 
         var peer = new PeerInfo(remote.DeviceId, ip, port, remote.Nickname, remote.Avatar, DateTimeOffset.UtcNow);
         store.UpsertPeer(peer, gatewayId is null ? PeerEndpointKind.Direct : PeerEndpointKind.Gateway,
             gatewayId, source);
+        store.SavePeerCapabilities(peer.DeviceId, remote.Capabilities);
         return peer;
     }
 
@@ -249,6 +268,7 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false) 
             LastSeenUtc = DateTimeOffset.UtcNow
         });
         store.TouchPeerEndpoint(peer.DeviceId, peer.Ip, peer.Port);
+        store.SavePeerCapabilities(peer.DeviceId, remote.Capabilities);
         return remote;
     }
 
@@ -326,6 +346,32 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false) 
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<ReminderReceipt>(Json, cancellationToken).ConfigureAwait(false)
                ?? throw new InvalidDataException("对方未返回提醒结果。");
+    }
+
+    public async Task<ChatReceipt> SendChatAsync(PeerInfo peer, ChatMessageRequest message,
+        CancellationToken cancellationToken = default)
+    {
+        var hello = await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        if (!(hello.Capabilities ?? []).Contains(NodeDefaults.ChatCapability, StringComparer.Ordinal))
+            return new ChatReceipt(false, "对方版本不支持聊天。", 404);
+        using var response = await http.PostAsJsonAsync(Route(peer, "chat/messages"), message, Json,
+            cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return new ChatReceipt(false, "对方版本不支持聊天。", 404);
+        try
+        {
+            var receipt = await response.Content.ReadFromJsonAsync<ChatReceipt>(Json, cancellationToken).ConfigureAwait(false);
+            return receipt ?? new ChatReceipt(false, "对方未返回送达确认。", (int)response.StatusCode);
+        }
+        catch (JsonException) when (!response.IsSuccessStatusCode)
+        {
+            return new ChatReceipt(false, response.StatusCode switch
+            {
+                HttpStatusCode.Forbidden => "对方未登记本机设备或来源入口不匹配。",
+                HttpStatusCode.RequestEntityTooLarge => "消息超过 16 KiB 请求上限。",
+                _ => $"对方返回 HTTP {(int)response.StatusCode}。"
+            }, (int)response.StatusCode);
+        }
     }
 
     public async Task<SharedUpdatePackage?> GetSharedUpdateAsync(PeerInfo peer,

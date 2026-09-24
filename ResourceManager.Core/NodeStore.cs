@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 
 namespace ResourceManager.Core;
 
-public sealed class NodeStore
+public sealed partial class NodeStore
 {
     private readonly object gate = new();
     private readonly string connectionString;
@@ -44,9 +44,20 @@ public sealed class NodeStore
             CREATE TABLE IF NOT EXISTS resources (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, mode TEXT NOT NULL, source_path TEXT NOT NULL, published_utc TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS favorites (peer_id TEXT NOT NULL, resource_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(peer_id, resource_id));
             CREATE TABLE IF NOT EXISTS downloads (id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, resource_id TEXT NOT NULL, resource_name TEXT NOT NULL, kind TEXT NOT NULL, target_path TEXT NOT NULL, status TEXT NOT NULL, downloaded_bytes INTEGER NOT NULL, total_bytes INTEGER NOT NULL, error TEXT);
+            CREATE TABLE IF NOT EXISTS peer_capabilities (device_id TEXT PRIMARY KEY, capabilities TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS chat_conversations (peer_id TEXT PRIMARY KEY, nickname TEXT NOT NULL, read_through INTEGER NOT NULL DEFAULT 0, muted_until TEXT, removed INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT NOT NULL, peer_id TEXT NOT NULL,
+                outgoing INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT, resource_id TEXT, resource_name TEXT,
+                sent_utc TEXT NOT NULL, received_utc TEXT, state TEXT NOT NULL, next_attempt_utc TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0, error TEXT, auto_expire_utc TEXT,
+                UNIQUE(peer_id, message_id, outgoing));
+            CREATE INDEX IF NOT EXISTS ix_chat_pending ON chat_messages(outgoing,state,next_attempt_utc,peer_id,seq);
+            CREATE INDEX IF NOT EXISTS ix_chat_timeline ON chat_messages(peer_id,seq);
             """;
         command.ExecuteNonQuery();
         EnsureColumn(db, "resources", "note", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(db, "chat_messages", "auto_expire_utc", "TEXT");
         using (var migrate = db.CreateCommand())
         {
             migrate.CommandText = """
@@ -164,6 +175,9 @@ public sealed class NodeStore
                 """, "$ip", peer.Ip, "$port", peer.Port, "$name", peer.Nickname, "$avatar", peer.Avatar,
                 "$seen", peer.LastSeenUtc?.ToString("O"), "$id", peer.DeviceId);
             command.ExecuteNonQuery();
+            using var chatName = Cmd(db, "UPDATE chat_conversations SET nickname=$name WHERE peer_id=$id",
+                "$name", peer.Nickname, "$id", peer.DeviceId);
+            chatName.ExecuteNonQuery();
         }
     }
 
@@ -258,6 +272,9 @@ public sealed class NodeStore
                 "$kind", endpointKind.ToString(), "$gateway", gatewayId, "$source", source,
                 "$seen", peer.LastSeenUtc?.ToString("O"));
             endpoint.ExecuteNonQuery();
+            using var restoreChat = Cmd(db, "UPDATE chat_conversations SET nickname=$name,removed=0 WHERE peer_id=$id",
+                "$name", peer.Nickname, "$id", peer.DeviceId);
+            restoreChat.ExecuteNonQuery();
         }
     }
 
@@ -459,13 +476,24 @@ public sealed class NodeStore
         }
     }
 
-    public void RemovePeer(string deviceId)
+    public void RemovePeer(string deviceId, bool deleteChatHistory = false)
     {
         lock (gate)
         {
             using var db = Open();
             using var transaction = db.BeginTransaction();
-            foreach (var sql in new[] { "DELETE FROM favorites WHERE peer_id=$id", "DELETE FROM peer_notes WHERE device_id=$id", "DELETE FROM peer_endpoints WHERE device_id=$id", "DELETE FROM peers WHERE device_id=$id" })
+            var commands = new List<string> { "DELETE FROM favorites WHERE peer_id=$id", "DELETE FROM peer_notes WHERE device_id=$id", "DELETE FROM peer_endpoints WHERE device_id=$id", "DELETE FROM peer_capabilities WHERE device_id=$id", "DELETE FROM peers WHERE device_id=$id" };
+            if (deleteChatHistory)
+            {
+                commands.Add("DELETE FROM chat_messages WHERE peer_id=$id");
+                commands.Add("DELETE FROM chat_conversations WHERE peer_id=$id");
+            }
+            else
+            {
+                commands.Add("UPDATE chat_messages SET state='Canceled',next_attempt_utc=NULL,error='设备已移除' WHERE peer_id=$id AND outgoing=1 AND state IN ('Queued','Sending')");
+                commands.Add("UPDATE chat_conversations SET removed=1 WHERE peer_id=$id");
+            }
+            foreach (var sql in commands)
             {
                 using var command = Cmd(db, sql, "$id", deviceId);
                 command.Transaction = transaction;

@@ -38,6 +38,15 @@ public sealed record ResourceReminderRequest(string Protocol, string MessageId, 
     string ResourceName, ResourceKind Kind, string Note, DateTimeOffset SentUtc);
 public sealed record ReminderReceipt(bool Accepted, string? Reason = null, int StatusCode = 200);
 public sealed record ReminderDelivery(PeerInfo Sender, RemoteResource Resource, DateTimeOffset SentUtc, DateTimeOffset ReceivedUtc);
+public sealed record ChatMessageRequest(string Protocol, string MessageId, string SenderDeviceId,
+    string RecipientDeviceId, DateTimeOffset SentUtc, string Kind, string? Text = null, string? ResourceId = null);
+public sealed record ChatReceipt(bool Accepted, string? Reason = null, int StatusCode = 200,
+    bool Duplicate = false, DateTimeOffset? ReceivedUtc = null);
+public sealed record ChatMessage(string MessageId, string PeerId, bool Outgoing, string Kind, string? Text,
+    string? ResourceId, string? ResourceName, DateTimeOffset SentUtc, DateTimeOffset? ReceivedUtc,
+    string State, DateTimeOffset? NextAttemptUtc, int Attempts, string? Error);
+public sealed record ChatConversation(string PeerId, string Nickname, long Unread, DateTimeOffset? MutedUntilUtc,
+    bool Removed, DateTimeOffset? LastMessageUtc);
 public sealed record AppSettings(NodeProfile Profile, int ListenPort, bool CloseToTray, bool AutoUpdate);
 
 public static class NodeDefaults
@@ -49,5 +58,6 @@ public static class NodeDefaults
     public const string RouterDiscoveryCapability = "router-discovery-v1";
     public const string UpnpMappingCapability = "upnp-mapping-v1";
     public const string ReminderCapability = "reminder-v1";
+    public const string ChatCapability = "chat-v1";
     public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ResourceManager");
 }

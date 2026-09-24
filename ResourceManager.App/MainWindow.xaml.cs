@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly ResourceCatalog catalog;
     private readonly UpdateClient updateClient;
     private readonly ReminderService reminders;
+    private readonly ChatService chat;
     private readonly FeedbackStore feedbackStore = new();
     private readonly GitCollaborationStore gitProjects = new(NodeDefaults.DataDirectory);
     private readonly FeedbackSecretStore feedbackSecrets;
@@ -103,15 +104,18 @@ public partial class MainWindow : Window
         discovery = new LanDiscoveryService(store);
         upnpGatewayClient = new UpnpGatewayClient();
         mappingManager = new UpnpPortMappingManager(store, upnpGatewayClient);
-        client = new PeerClient(store, supportsReminders: true);
+        client = new PeerClient(store, supportsReminders: true, supportsChat: true);
         reminders = new ReminderService(store, client);
-        node = new PeerNode(store, discovery, mappingManager, reminders, gitProjects);
+        chat = new ChatService(store, client);
+        node = new PeerNode(store, discovery, mappingManager, reminders, gitProjects, chat);
         gatewayDiscovery = new GatewayDiscoveryService(store, client);
         downloader = new DownloadManager(store, client);
         catalog = new ResourceCatalog(store);
         updateClient = new UpdateClient(store.DataDirectory);
         updateClient.CleanupOldDownloads();
         reminders.ReminderReceived += delivery => Dispatcher.BeginInvoke(() => ShowReminder(delivery));
+        chat.MessageReceived += message => Dispatcher.BeginInvoke(() => OnChatReceived(message));
+        chat.MessageChanged += message => Dispatcher.BeginInvoke(() => OnChatChanged(message));
         var settings = store.GetSettings();
         NicknameBox.Text = settings.Profile.Nickname;
         ListenPortBox.Text = settings.ListenPort.ToString();
@@ -156,6 +160,7 @@ public partial class MainWindow : Window
         RefreshDownloadsView();
         InitializeFeedback();
         RefreshGitProjectList();
+        RefreshChatConversations();
         UpdatePageHeader();
     }
 
@@ -236,6 +241,7 @@ public partial class MainWindow : Window
         timer.Start();
         StartStartupUpdateCheck();
         await RefreshAllAsync();
+        await PumpChatSafeAsync();
         await RefreshRouterInfoAsync();
         await MaintainMappingsAsync();
         try { AutoStartManager.RefreshEnabledPath(); } catch { }
@@ -278,6 +284,7 @@ public partial class MainWindow : Window
     private async Task TimerTickAsync()
     {
         await RefreshAllAsync();
+        await PumpChatSafeAsync();
         if (Tabs.SelectedIndex == 2) await RefreshGitAsync();
         if (DateTimeOffset.UtcNow >= nextRouterInfoRefresh) await RefreshRouterInfoAsync();
         if (DateTimeOffset.UtcNow >= nextMappingMaintenance) await MaintainMappingsAsync();
@@ -465,6 +472,8 @@ public partial class MainWindow : Window
                         var catalog = await client.GetCatalogAsync(candidate);
                         peerCatalogs[peer.DeviceId] = catalog.Resources;
                         peerCapabilities[peer.DeviceId] = catalog.Hello.Capabilities ?? [];
+                        if (peerStatus.GetValueOrDefault(peer.DeviceId) != "在线")
+                            store.WakeChatMessages(peer.DeviceId);
                         peerStatus[peer.DeviceId] = "在线";
                         connected = true;
                         break;
@@ -486,6 +495,7 @@ public partial class MainWindow : Window
             RefreshPeersView();
             RefreshFavoritesView();
             RefreshDownloadsView();
+            RefreshChatConversations();
         }
         finally { refreshGate.Release(); }
     }
@@ -503,6 +513,7 @@ public partial class MainWindow : Window
             ("设备", "连接同事的电脑，浏览他们分享的资源"),
             ("我的发布", "决定哪些资源可以被其他设备看到"),
             ("Git 协作", "与附近设备交换提交，查看每个成员的开发进度"),
+            ("聊天", "与已连接设备直接交谈，离线消息会在本机等待补发"),
             ("收藏", "常用资源的快捷入口和当前状态"),
             ("下载", "查看传输进度，继续中断的任务"),
             ("反馈", "向维护者提交问题、建议和使用体验"),
@@ -519,12 +530,13 @@ public partial class MainWindow : Window
         if (NavList.SelectedIndex != Tabs.SelectedIndex) NavList.SelectedIndex = Tabs.SelectedIndex;
         UpdatePageHeader();
         if (!IsLoaded) return;
-        if (Tabs.SelectedIndex is 0 or 3) await RefreshAllAsync();
+        if (Tabs.SelectedIndex is 0 or 4) await RefreshAllAsync();
         if (Tabs.SelectedIndex == 1) RefreshLocalView();
         if (Tabs.SelectedIndex == 2) await RefreshGitAsync();
-        if (Tabs.SelectedIndex == 4) RefreshDownloadsView();
-        if (Tabs.SelectedIndex == 5) await RefreshFeedbackTargetHealthAsync();
-        if (Tabs.SelectedIndex == 6) await RefreshRouterInfoAsync();
+        if (Tabs.SelectedIndex == 3) { RefreshChatConversations(); RefreshChatTimeline(); }
+        if (Tabs.SelectedIndex == 5) RefreshDownloadsView();
+        if (Tabs.SelectedIndex == 6) await RefreshFeedbackTargetHealthAsync();
+        if (Tabs.SelectedIndex == 7) await RefreshRouterInfoAsync();
     }
 
     private void PeersGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSelectedResources();
@@ -797,12 +809,14 @@ public partial class MainWindow : Window
     private void RemovePeer_Click(object sender, RoutedEventArgs e)
     {
         if (PeersGrid.SelectedItem is not PeerRow row) return;
-        if (System.Windows.MessageBox.Show($"移除 {row.Nickname}？该设备的收藏和本机备注也会删除。", "确认移除", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        store.RemovePeer(row.Peer.DeviceId);
+        var choice = System.Windows.MessageBox.Show($"移除 {row.Nickname}？\n\n是：保留聊天记录（取消未送达消息）\n否：一并删除聊天记录\n取消：不移除设备\n\n收藏和本机备注都会删除。",
+            "移除设备", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (choice == MessageBoxResult.Cancel) return;
+        store.RemovePeer(row.Peer.DeviceId, deleteChatHistory: choice == MessageBoxResult.No);
         peerStatus.Remove(row.Peer.DeviceId);
         peerCatalogs.Remove(row.Peer.DeviceId);
         peerCapabilities.Remove(row.Peer.DeviceId);
-        RefreshPeersView(); RefreshFavoritesView();
+        RefreshPeersView(); RefreshFavoritesView(); RefreshChatConversations(); RefreshChatTimeline();
         SetStatus("设备已移除，本机备注一并删除。");
     }
 
@@ -893,8 +907,8 @@ public partial class MainWindow : Window
         var notes = store.GetPeerNotes();
         var targets = store.GetPeers().Select(peer => new ReminderTarget(peer,
                 peerStatus.GetValueOrDefault(peer.DeviceId, "未检查"),
-                peerCapabilities.GetValueOrDefault(peer.DeviceId, [])
-                    .Contains(NodeDefaults.ReminderCapability, StringComparer.Ordinal),
+                store.GetPeerCapabilities(peer.DeviceId).Contains(NodeDefaults.ReminderCapability, StringComparer.Ordinal),
+                store.GetPeerCapabilities(peer.DeviceId).Contains(NodeDefaults.ChatCapability, StringComparer.Ordinal),
                 notes.GetValueOrDefault(peer.DeviceId, "")))
             .ToArray();
         if (targets.Length == 0) { SetStatus("本机还没有设备记录，请先在设备页连接设备。"); return; }
@@ -912,6 +926,12 @@ public partial class MainWindow : Window
         {
             try
             {
+                if (store.GetPeerCapabilities(peer.DeviceId).Contains(NodeDefaults.ChatCapability, StringComparer.Ordinal))
+                {
+                    chat.QueueResource(peer.DeviceId, resource.Id);
+                    sent++;
+                    continue;
+                }
                 var request = new ResourceReminderRequest(NodeDefaults.ReminderCapability, Guid.NewGuid().ToString("N"),
                     settings.Profile.DeviceId, resource.Id, resource.Name, resource.Kind, resource.Note, DateTimeOffset.UtcNow);
                 var receipt = await client.SendReminderAsync(peer, request);
@@ -920,7 +940,8 @@ public partial class MainWindow : Window
             }
             catch (Exception ex) { failures.Add($"{peer.Nickname}：{ex.Message}"); }
         }
-        if (failures.Count == 0) SetStatus($"提醒已送达 {sent} 台设备。");
+        if (sent > 0) { RefreshChatConversations(); await PumpChatSafeAsync(); }
+        if (failures.Count == 0) SetStatus($"已处理 {sent} 台设备；聊天卡片会在对方上线后自动补发。");
         else System.Windows.MessageBox.Show(
             $"已送达 {sent} 台设备，{failures.Count} 台失败：\n\n{string.Join("\n", failures)}",
             "发送提醒结果", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -955,7 +976,7 @@ public partial class MainWindow : Window
         const double gap = 10;
         var workArea = SystemParameters.WorkArea;
         var bottom = workArea.Bottom - edgeMargin;
-        foreach (var window in reminderWindows.Where(item => item.IsLoaded).Reverse())
+        foreach (var window in reminderWindows.Cast<Window>().Concat(chatToastWindows).Where(item => item.IsLoaded).Reverse())
         {
             window.Left = workArea.Right - window.ActualWidth - edgeMargin;
             window.Top = Math.Max(workArea.Top + edgeMargin, bottom - window.ActualHeight);
@@ -1002,7 +1023,7 @@ public partial class MainWindow : Window
         {
             var job = downloader.CreateJob(peer, resource, dialog.SelectedPath);
             RefreshDownloadsView();
-            Tabs.SelectedIndex = 3;
+            Tabs.SelectedIndex = 5;
             QueueDownload(job.Id);
         }
         catch (Exception ex) { ShowError("创建下载失败", ex); }

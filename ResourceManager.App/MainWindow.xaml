@@ -303,6 +303,7 @@
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="设备"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="我的发布"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE943;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="Git 协作"/></StackPanel></ListBoxItem>
+                    <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F2;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="聊天"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE734;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="收藏"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="下载"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE939;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="反馈"/></StackPanel></ListBoxItem>
@@ -525,6 +526,60 @@
                             </Grid>
                         </StackPanel>
                     </ScrollViewer>
+                </TabItem>
+
+                <TabItem Header="聊天">
+                    <Grid Margin="28,23,28,22">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border Style="{StaticResource Card}"><StackPanel>
+                            <TextBlock Text="局域网一对一聊天" Style="{StaticResource PageHeading}"/>
+                            <TextBlock Text="消息直达对方设备；离线消息暂存本机，上线后自动补发。历史只存各自电脑。" Style="{StaticResource Caption}" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                            <TextBlock Text="当前连接没有端到端加密；同一网络中的第三方可能看到聊天内容，请勿发送敏感信息。" Foreground="#B74650" FontSize="12" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                        </StackPanel></Border>
+                        <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="270"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource Card}" Padding="13"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <TextBlock Text="会话" Style="{StaticResource CardHeading}" Margin="5,1,0,12"/>
+                                <ListBox x:Name="ChatConversationList" Grid.Row="1" ItemsSource="{Binding ChatConversations}" SelectionChanged="ChatConversation_SelectionChanged">
+                                    <ListBox.ItemTemplate><DataTemplate><StackPanel>
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Name}" Style="{StaticResource ItemTitle}"/>
+                                            <Border Grid.Column="1" Background="#EAF2FF" CornerRadius="9" Padding="6,1" Visibility="{Binding UnreadVisibility}"><TextBlock Text="{Binding Unread}" Foreground="#2867D9" FontWeight="SemiBold" FontSize="11"/></Border>
+                                        </Grid>
+                                        <TextBlock Text="{Binding Status}" Style="{StaticResource StatusTextStyle}" Margin="0,4,0,0"/>
+                                    </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid></Border>
+                            <Border Grid.Column="2" Style="{StaticResource Card}" Padding="16"><Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/><RowDefinition Height="12"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel><TextBlock x:Name="ChatPeerTitle" Text="选择一个设备开始聊天" Style="{StaticResource CardHeading}"/>
+                                        <TextBlock x:Name="ChatPeerHint" Text="只对支持 0.3.7 聊天的设备开放" Style="{StaticResource Caption}" Margin="0,4,0,0"/></StackPanel>
+                                    <Button x:Name="ChatMuteButton" Grid.Column="1" Content="静音 1 小时" Click="ChatMute_Click" Style="{StaticResource SecondaryButton}" Height="32" Margin="0,0,8,0" IsEnabled="False"/>
+                                    <Button x:Name="ChatClearButton" Grid.Column="2" Content="清空本机记录" Click="ChatClear_Click" Style="{StaticResource DangerButton}" Height="32" IsEnabled="False"/>
+                                </Grid>
+                                <ListBox x:Name="ChatMessageList" Grid.Row="2" ItemsSource="{Binding ChatMessages}" SelectionChanged="ChatMessage_SelectionChanged">
+                                    <ListBox.ItemTemplate><DataTemplate><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                        <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Author}" FontWeight="SemiBold" Foreground="#53647B" FontSize="12"/>
+                                            <TextBlock Text="{Binding Time}" Foreground="#708099" FontSize="11" Margin="8,0,0,0"/></StackPanel>
+                                        <StackPanel Grid.Row="1" Margin="0,5,0,0">
+                                            <TextBlock Text="{Binding Body}" Foreground="{StaticResource Ink}" FontSize="13" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding StateText}" Foreground="#708099" FontSize="11" Margin="0,4,0,0"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                <Button Content="取消发送" Click="ChatCancel_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding CancelVisibility}" Margin="0,0,7,0"/>
+                                                <Button Content="重试" Click="ChatRetry_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding RetryVisibility}" Margin="0,0,7,0"/>
+                                                <Button Content="下载资源" Click="ChatDownload_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding DownloadVisibility}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid></DataTemplate></ListBox.ItemTemplate>
+                                </ListBox>
+                                <Grid Grid.Row="4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="ChatInput" Height="56" MaxLength="2000" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Padding="11,8" KeyDown="ChatInput_KeyDown"/>
+                                    <Button x:Name="ChatResourceButton" Grid.Column="1" Content="发送资源" Click="ChatResource_Click" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" IsEnabled="False"/>
+                                    <Button x:Name="ChatSendButton" Grid.Column="2" Content="发送" Click="ChatSend_Click" Margin="8,0,0,0" IsEnabled="False"/>
+                                </Grid>
+                            </Grid></Border>
+                        </Grid>
+                    </Grid>
                 </TabItem>
 
                 <TabItem Header="收藏">
