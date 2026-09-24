@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, IReadOnlyList<RemoteResource>> peerCatalogs = [];
     private readonly Dictionary<string, string[]> peerCapabilities = [];
     private readonly HashSet<string> openReminders = [];
+    private readonly List<ReminderWindow> reminderWindows = [];
     private readonly Dictionary<string, ActiveDownload> activeDownloads = [];
     private readonly HashSet<string> removingDownloads = [];
     private byte[]? pendingAvatar;
@@ -75,7 +76,7 @@ public partial class MainWindow : Window
         discovery = new LanDiscoveryService(store);
         upnpGatewayClient = new UpnpGatewayClient();
         mappingManager = new UpnpPortMappingManager(store, upnpGatewayClient);
-        client = new PeerClient(store);
+        client = new PeerClient(store, supportsReminders: true);
         reminders = new ReminderService(store, client);
         node = new PeerNode(store, discovery, mappingManager, reminders);
         gatewayDiscovery = new GatewayDiscoveryService(store, client);
@@ -826,7 +827,14 @@ public partial class MainWindow : Window
         var key = delivery.Sender.DeviceId + "\0" + delivery.Resource.Id;
         if (!openReminders.Add(key)) return;
         var window = new ReminderWindow(delivery.Sender, delivery.Resource, delivery.SentUtc);
-        window.Closed += (_, _) => openReminders.Remove(key);
+        reminderWindows.Add(window);
+        window.Loaded += (_, _) => PositionReminderWindows();
+        window.Closed += (_, _) =>
+        {
+            openReminders.Remove(key);
+            reminderWindows.Remove(window);
+            PositionReminderWindows();
+        };
         window.DownloadRequested += (_, _) => { window.Close(); BeginDownload(delivery.Sender, delivery.Resource); };
         window.MuteRequested += (_, _) =>
         {
@@ -834,7 +842,20 @@ public partial class MainWindow : Window
             SetStatus($"已静音 {delivery.Sender.Nickname} 的提醒 1 小时。");
         };
         window.Show();
-        window.Activate();
+    }
+
+    private void PositionReminderWindows()
+    {
+        const double edgeMargin = 16;
+        const double gap = 10;
+        var workArea = SystemParameters.WorkArea;
+        var bottom = workArea.Bottom - edgeMargin;
+        foreach (var window in reminderWindows.Where(item => item.IsLoaded).Reverse())
+        {
+            window.Left = workArea.Right - window.ActualWidth - edgeMargin;
+            window.Top = Math.Max(workArea.Top + edgeMargin, bottom - window.ActualHeight);
+            bottom = window.Top - gap;
+        }
     }
 
     private void Favorite_Click(object sender, RoutedEventArgs e)

@@ -42,17 +42,19 @@ public partial class SendReminderDialog : Window
 
     private sealed class TargetRow(ReminderTarget target) : INotifyPropertyChanged
     {
-        private bool isChecked = target.SupportsReminder && target.Status == "在线";
+        private bool isChecked;
 
         public ReminderTarget Target { get; } = target;
         public string DisplayName => Target.DisplayName;
         public string Summary => $"{Target.Peer.Ip}:{Target.Peer.Port}  ·  {Target.Detail}";
+        public bool IsSelectable => Target.SupportsReminder && Target.Status == "在线";
 
         public bool IsChecked
         {
             get => isChecked;
             set
             {
+                if (value && !IsSelectable) return;
                 if (isChecked == value) return;
                 isChecked = value;
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChecked)));

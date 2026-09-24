@@ -40,8 +40,11 @@ public sealed class PeerNode : IAsyncDisposable
     private PeerHello Self()
     {
         var settings = store.GetSettings();
+        var capabilities = reminders is null
+            ? new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability }
+            : new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability };
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
-            [NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability]);
+            capabilities);
     }
 
     public async Task StartAsync(int port, string listenAddress = "0.0.0.0", CancellationToken cancellationToken = default)
@@ -163,7 +166,7 @@ public sealed class PeerNode : IAsyncDisposable
     }
 }
 
-public sealed class PeerClient(NodeStore store) : IDisposable
+public sealed class PeerClient(NodeStore store, bool supportsReminders = false) : IDisposable
 {
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(8) };
     private readonly HttpClient updateHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
@@ -184,9 +187,11 @@ public sealed class PeerClient(NodeStore store) : IDisposable
         CancellationToken cancellationToken = default, string? gatewayId = null, string source = "direct")
     {
         var settings = store.GetSettings();
+        var capabilities = supportsReminders
+            ? new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability }
+            : new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability };
         var hello = new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort,
-            settings.Profile.Avatar,
-            [NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability]);
+            settings.Profile.Avatar, capabilities);
         using var response = await http.PostAsJsonAsync(new Uri(Base(ip, port), "hello"), hello, Json, cancellationToken)
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();

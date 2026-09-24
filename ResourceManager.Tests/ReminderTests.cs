@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Net.Sockets;
 using ResourceManager.Core;
 
@@ -15,6 +16,8 @@ public sealed class ReminderTests
         pair.Sender.SetResourceNote(published.Id, "正式版");
         var deliveries = new List<ReminderDelivery>();
         pair.ReceiverReminders.ReminderReceived += deliveries.Add;
+        var hello = await pair.SenderClient.ProbeAsync(pair.ReceiverPeer);
+        Assert.Contains(NodeDefaults.ReminderCapability, hello.Capabilities ?? []);
 
         var receipt = await pair.SenderClient.SendReminderAsync(pair.ReceiverPeer,
             Request(pair, published.Id, name: "伪造名称", note: "伪造备注"));
@@ -103,6 +106,21 @@ public sealed class ReminderTests
     }
 
     [Fact]
+    public async Task Reminder_ConcurrentDuplicates_AreSerializedBeforeValidation()
+    {
+        using var space = new TestSpace();
+        await using var pair = await StartPairAsync(space);
+        var published = pair.Sender.AddResource(space.Write("并发.txt", "内容"), PublishMode.Reference);
+
+        var receipts = await Task.WhenAll(Enumerable.Range(0, 20)
+            .Select(_ => pair.SenderClient.SendReminderAsync(pair.ReceiverPeer, Request(pair, published.Id))));
+
+        Assert.Equal(1, receipts.Count(receipt => receipt.Accepted));
+        Assert.All(receipts.Where(receipt => !receipt.Accepted),
+            receipt => Assert.Contains("相同提醒", receipt.Reason));
+    }
+
+    [Fact]
     public async Task Reminder_MutedSender_IsRejected()
     {
         using var space = new TestSpace();
@@ -123,6 +141,9 @@ public sealed class ReminderTests
         using var space = new TestSpace();
         await using var pair = await StartPairAsync(space, receiverSupportsReminders: false);
         var published = pair.Sender.AddResource(space.Write("资料.txt", "内容"), PublishMode.Reference);
+
+        var hello = await pair.SenderClient.ProbeAsync(pair.ReceiverPeer);
+        Assert.DoesNotContain(NodeDefaults.ReminderCapability, hello.Capabilities ?? []);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(
             () => pair.SenderClient.SendReminderAsync(pair.ReceiverPeer, Request(pair, published.Id)));
@@ -146,6 +167,29 @@ public sealed class ReminderTests
         var protocolError = await Assert.ThrowsAsync<InvalidOperationException>(
             () => pair.SenderClient.SendReminderAsync(pair.ReceiverPeer, wrongProtocol));
         Assert.Contains("协议", protocolError.Message);
+    }
+
+    [Fact]
+    public async Task Reminder_NullNote_IsRejectedAsBadRequest()
+    {
+        using var space = new TestSpace();
+        await using var pair = await StartPairAsync(space);
+        var published = pair.Sender.AddResource(space.Write("空备注.txt", "内容"), PublishMode.Reference);
+        var deviceId = pair.Sender.GetSettings().Profile.DeviceId;
+        var json = $$"""
+            {"protocol":"{{NodeDefaults.ReminderCapability}}","messageId":"{{Guid.NewGuid():N}}","senderDeviceId":"{{deviceId}}","resourceId":"{{published.Id}}","resourceName":"{{published.Name}}","kind":"File","note":null,"sentUtc":"{{DateTimeOffset.UtcNow:O}}"}
+            """;
+        using var http = new HttpClient();
+        using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+        using var response = await http.PostAsync(
+            $"http://127.0.0.1:{pair.ReceiverPeer.Port}/api/v1/reminders", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var receipt = await response.Content.ReadFromJsonAsync<ReminderReceipt>();
+        Assert.NotNull(receipt);
+        Assert.False(receipt.Accepted);
+        Assert.Equal(400, receipt.StatusCode);
     }
 
     [Fact]
