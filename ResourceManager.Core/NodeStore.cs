@@ -478,6 +478,9 @@ public sealed class NodeStore
     public LocalResource AddResource(string sourcePath, PublishMode mode)
     {
         sourcePath = Path.GetFullPath(sourcePath);
+        if (sourcePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(segment => segment.Equals(".git", StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException("Git 元数据不能作为普通资源发布。", nameof(sourcePath));
         var kind = File.Exists(sourcePath) ? ResourceKind.File : Directory.Exists(sourcePath) ? ResourceKind.Folder : throw new FileNotFoundException("资源路径不存在。", sourcePath);
         var id = Guid.NewGuid().ToString("N");
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(sourcePath));
@@ -509,6 +512,7 @@ public sealed class NodeStore
         Directory.CreateDirectory(target);
         foreach (var entry in Directory.EnumerateFileSystemEntries(source))
         {
+            if (Path.GetFileName(entry).Equals(".git", StringComparison.OrdinalIgnoreCase)) continue;
             var attributes = File.GetAttributes(entry);
             if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
             var destination = Path.Combine(target, Path.GetFileName(entry));

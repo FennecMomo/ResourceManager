@@ -302,6 +302,7 @@
                 <ListBox x:Name="NavList" Grid.Row="2" ItemContainerStyle="{StaticResource NavItem}" SelectionChanged="Nav_SelectionChanged" SelectedIndex="0">
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="设备"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="我的发布"/></StackPanel></ListBoxItem>
+                    <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE943;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="Git 协作"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE734;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="收藏"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="下载"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE939;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="反馈"/></StackPanel></ListBoxItem>
@@ -453,6 +454,77 @@
                             </StackPanel>
                         </Grid></Border>
                     </Grid>
+                </TabItem>
+
+                <TabItem Header="Git 协作">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="28,23,28,22">
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+                                <StackPanel>
+                                    <TextBlock Text="局域网 Git 协作" Style="{StaticResource PageHeading}"/>
+                                    <TextBlock Text="每个成员保有自己的仓库和协作线。在线设备互相补齐提交记录；离线时仍可在本地提交。" Style="{StaticResource Caption}" Margin="0,5,0,12" TextWrapping="Wrap"/>
+                                    <TextBlock Text="发布会传送所选分支的提交历史和 LFS 大文件；请确认其中没有不应共享的内容。协作包上限 1 GB。" Style="{StaticResource Caption}" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                                    <TextBlock x:Name="GitEnvironmentText" Text="正在检测 Git…" Foreground="{StaticResource Ink}" TextWrapping="Wrap"/>
+                                    <StackPanel x:Name="GitMissingPanel" Orientation="Horizontal" Margin="0,12,0,0" Visibility="Collapsed">
+                                        <Button x:Name="GitInstallButton" Content="一键安装 Git" Click="GitInstall_Click" Margin="0,0,8,0"/>
+                                        <Button Content="选择已有 git.exe" Click="GitChooseExe_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"/>
+                                        <Button Content="重新检测" Click="GitDetect_Click" Style="{StaticResource QuietButton}"/>
+                                        <Button Content="官方下载页" Click="GitDownloadOfficial_Click" Style="{StaticResource QuietButton}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="300"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+                                        <StackPanel>
+                                            <TextBlock Text="创建协作项目" Style="{StaticResource CardHeading}"/>
+                                            <TextBlock Text="选择已有 Git 仓库，给局域网项目起一个名字。" Style="{StaticResource Caption}" Margin="0,4,0,12" TextWrapping="Wrap"/>
+                                            <TextBox x:Name="GitProjectNameBox" ToolTip="项目名称" Margin="0,0,0,8"/>
+                                            <TextBox x:Name="GitRepositoryPathBox" IsReadOnly="True" ToolTip="本地仓库目录" Margin="0,0,0,8"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Content="选择仓库" Click="GitChooseRepository_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"/>
+                                                <Button x:Name="GitCreateButton" Content="创建项目" Click="GitCreate_Click" IsEnabled="False"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="协作项目" Style="{StaticResource CardHeading}"/>
+                                                <Button Grid.Column="1" Content="刷新" Click="GitRefresh_Click" Style="{StaticResource QuietButton}" Height="30" Padding="8,0"/>
+                                            </Grid>
+                                            <ListBox x:Name="GitProjectList" ItemsSource="{Binding GitProjectRows}" Height="310" SelectionChanged="GitProjectList_SelectionChanged">
+                                                <ListBox.ItemTemplate><DataTemplate><StackPanel>
+                                                    <TextBlock Text="{Binding Name}" Style="{StaticResource ItemTitle}"/>
+                                                    <TextBlock Text="{Binding Summary}" Style="{StaticResource Meta}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                                </StackPanel></DataTemplate></ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                                <Border Grid.Column="2" Style="{StaticResource Card}">
+                                    <StackPanel>
+                                        <TextBlock x:Name="GitSelectedProjectText" Text="选择一个协作项目" Style="{StaticResource PageHeading}"/>
+                                        <TextBlock x:Name="GitProjectStatusText" Text="项目中的每条线属于一台设备。" Style="{StaticResource Caption}" Margin="0,5,0,12" TextWrapping="Wrap"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                            <Button x:Name="GitJoinButton" Content="加入并下载仓库" Click="GitJoin_Click" IsEnabled="False" Margin="0,0,8,0"/>
+                                            <Button x:Name="GitPublishButton" Content="推送我的提交" Click="GitPublish_Click" IsEnabled="False" Margin="0,0,8,0"/>
+                                            <Button x:Name="GitSyncButton" Content="同步选中的点" Click="GitSync_Click" IsEnabled="False" Style="{StaticResource SecondaryButton}"/>
+                                        </StackPanel>
+                                        <TextBlock Text="协作图" Style="{StaticResource CardHeading}" Margin="0,0,0,6"/>
+                                        <TextBlock Text="实心点是 Git 提交，空心点是加入或同步。点击点可查看详情。" Style="{StaticResource Caption}" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                                        <Border Background="#FAFCFF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10" Height="330">
+                                            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                                <Canvas x:Name="GitGraphCanvas" Width="620" Height="300"/>
+                                            </ScrollViewer>
+                                        </Border>
+                                        <TextBlock x:Name="GitSelectedPointText" Text="尚未选择提交点。" Foreground="{StaticResource Ink}" Margin="0,12,0,0" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </StackPanel>
+                    </ScrollViewer>
                 </TabItem>
 
                 <TabItem Header="收藏">

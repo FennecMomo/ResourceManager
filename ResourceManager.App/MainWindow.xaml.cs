@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private readonly UpdateClient updateClient;
     private readonly ReminderService reminders;
     private readonly FeedbackStore feedbackStore = new();
+    private readonly GitCollaborationStore gitProjects = new(NodeDefaults.DataDirectory);
     private readonly FeedbackSecretStore feedbackSecrets;
     private readonly FeedbackServerClient feedbackServerClient = new();
     private readonly GitHubFeedbackClient githubFeedbackClient = new();
@@ -49,7 +50,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<ScrollViewer, double> smoothScrollTargets = [];
     private readonly HashSet<string> removingDownloads = [];
     private byte[]? pendingAvatar;
-    private bool refreshing;
+    private readonly SemaphoreSlim refreshGate = new(1, 1);
     private bool exiting;
     private bool checkingUpdate;
     private bool startupUpdateCheckStarted;
@@ -104,7 +105,7 @@ public partial class MainWindow : Window
         mappingManager = new UpnpPortMappingManager(store, upnpGatewayClient);
         client = new PeerClient(store, supportsReminders: true);
         reminders = new ReminderService(store, client);
-        node = new PeerNode(store, discovery, mappingManager, reminders);
+        node = new PeerNode(store, discovery, mappingManager, reminders, gitProjects);
         gatewayDiscovery = new GatewayDiscoveryService(store, client);
         downloader = new DownloadManager(store, client);
         catalog = new ResourceCatalog(store);
@@ -154,6 +155,7 @@ public partial class MainWindow : Window
         RefreshFavoritesView();
         RefreshDownloadsView();
         InitializeFeedback();
+        RefreshGitProjectList();
         UpdatePageHeader();
     }
 
@@ -276,6 +278,7 @@ public partial class MainWindow : Window
     private async Task TimerTickAsync()
     {
         await RefreshAllAsync();
+        if (Tabs.SelectedIndex == 2) await RefreshGitAsync();
         if (DateTimeOffset.UtcNow >= nextRouterInfoRefresh) await RefreshRouterInfoAsync();
         if (DateTimeOffset.UtcNow >= nextMappingMaintenance) await MaintainMappingsAsync();
     }
@@ -439,10 +442,12 @@ public partial class MainWindow : Window
 
     private async Task RefreshAllAsync()
     {
-        if (refreshing || exiting) return;
-        refreshing = true;
+        if (exiting) return;
+        try { await refreshGate.WaitAsync(updateCancellation.Token); }
+        catch (OperationCanceledException) when (exiting) { return; }
         try
         {
+            if (exiting) return;
             foreach (var peer in store.GetPeers())
             {
                 var candidates = store.GetPeerEndpoints(peer.DeviceId).Where(item => item.Source != "DeviceChanged")
@@ -482,7 +487,7 @@ public partial class MainWindow : Window
             RefreshFavoritesView();
             RefreshDownloadsView();
         }
-        finally { refreshing = false; }
+        finally { refreshGate.Release(); }
     }
 
     private void Nav_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -497,6 +502,7 @@ public partial class MainWindow : Window
         {
             ("设备", "连接同事的电脑，浏览他们分享的资源"),
             ("我的发布", "决定哪些资源可以被其他设备看到"),
+            ("Git 协作", "与附近设备交换提交，查看每个成员的开发进度"),
             ("收藏", "常用资源的快捷入口和当前状态"),
             ("下载", "查看传输进度，继续中断的任务"),
             ("反馈", "向维护者提交问题、建议和使用体验"),
@@ -513,11 +519,12 @@ public partial class MainWindow : Window
         if (NavList.SelectedIndex != Tabs.SelectedIndex) NavList.SelectedIndex = Tabs.SelectedIndex;
         UpdatePageHeader();
         if (!IsLoaded) return;
-        if (Tabs.SelectedIndex is 0 or 2) await RefreshAllAsync();
+        if (Tabs.SelectedIndex is 0 or 3) await RefreshAllAsync();
         if (Tabs.SelectedIndex == 1) RefreshLocalView();
-        if (Tabs.SelectedIndex == 3) RefreshDownloadsView();
-        if (Tabs.SelectedIndex == 4) await RefreshFeedbackTargetHealthAsync();
-        if (Tabs.SelectedIndex == 5) await RefreshRouterInfoAsync();
+        if (Tabs.SelectedIndex == 2) await RefreshGitAsync();
+        if (Tabs.SelectedIndex == 4) RefreshDownloadsView();
+        if (Tabs.SelectedIndex == 5) await RefreshFeedbackTargetHealthAsync();
+        if (Tabs.SelectedIndex == 6) await RefreshRouterInfoAsync();
     }
 
     private void PeersGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSelectedResources();
@@ -1898,6 +1905,7 @@ public partial class MainWindow : Window
         updateCancellation.Cancel();
         downloadCancellation.Cancel();
         feedbackCancellation.Cancel();
+        gitCancellation.Cancel();
         var downloads = activeDownloads.Values.Select(active => active.Task).ToArray();
         if (downloads.Length > 0)
         {
@@ -1920,6 +1928,7 @@ public partial class MainWindow : Window
             updateCancellation.Dispose();
             downloadCancellation.Dispose();
             feedbackCancellation.Dispose();
+            gitCancellation.Dispose();
             tray.Visible = false;
             tray.Dispose();
             appIcon.Dispose();

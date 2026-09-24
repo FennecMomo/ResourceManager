@@ -16,6 +16,7 @@ public sealed class PeerNode : IAsyncDisposable
     private readonly RouterDiscoveryCoordinator routerDiscovery;
     private readonly UpnpPortMappingManager mappingManager;
     private readonly ReminderService? reminders;
+    private readonly GitCollaborationStore gitProjects;
     private WebApplication? app;
 
     public PeerNode(NodeStore store)
@@ -25,11 +26,12 @@ public sealed class PeerNode : IAsyncDisposable
     }
 
     public PeerNode(NodeStore store, LanDiscoveryService discovery, UpnpPortMappingManager mappingManager,
-        ReminderService? reminders = null)
+        ReminderService? reminders = null, GitCollaborationStore? gitProjects = null)
     {
         this.store = store;
         this.mappingManager = mappingManager;
         this.reminders = reminders;
+        this.gitProjects = gitProjects ?? new GitCollaborationStore(store.DataDirectory);
         catalog = new ResourceCatalog(store);
         routerDiscovery = new RouterDiscoveryCoordinator(store, discovery, mappingManager);
     }
@@ -41,8 +43,8 @@ public sealed class PeerNode : IAsyncDisposable
     {
         var settings = store.GetSettings();
         var capabilities = reminders is null
-            ? new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability }
-            : new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability };
+            ? new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, "git-collaboration-v1" }
+            : new[] { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, NodeDefaults.ReminderCapability, "git-collaboration-v1" };
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
             capabilities);
     }
@@ -71,6 +73,11 @@ public sealed class PeerNode : IAsyncDisposable
                 var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
                 if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = ReminderService.MaxBodyBytes;
             }
+            if (context.Request.Path.Value == "/api/v1/git/sync")
+            {
+                var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+                if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = 2 * 1024 * 1024;
+            }
             await next();
         });
         instance.MapGet("/api/v1/health", () => Results.Ok(Self()));
@@ -86,6 +93,21 @@ public sealed class PeerNode : IAsyncDisposable
             return Results.Ok(Self());
         });
         instance.MapGet("/api/v1/resources", () => Results.Ok(catalog.List()));
+        instance.MapPost("/api/v1/git/sync", (GitSyncRequest request) =>
+        {
+            if (request.Events is null || request.Known is null ||
+                request.Events.Length > 50 || request.Known.Length > 2000)
+                return Results.BadRequest("协作记录数量过多。");
+            gitProjects.Merge(request.Events);
+            return Results.Ok(new GitSyncResponse(gitProjects.GetMissing(request.Known), gitProjects.GetVersions()));
+        });
+        instance.MapGet("/api/v1/git/bundles/{hash}", (string hash) =>
+        {
+            if (!gitProjects.GetEvents().Any(item => item.BundleHash == hash)) return Results.NotFound();
+            var path = gitProjects.BundlePath(hash);
+            return path is null ? Results.NotFound() : Results.File(path, "application/octet-stream",
+                enableRangeProcessing: true);
+        });
         instance.MapGet("/api/v1/updates/latest", async (CancellationToken token) =>
         {
             var update = await catalog.FindLatestUpdateAsync(token).ConfigureAwait(false);
@@ -170,6 +192,7 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false) 
 {
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(8) };
     private readonly HttpClient updateHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
+    private readonly HttpClient gitHttp = new() { Timeout = TimeSpan.FromMinutes(30) };
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private static Uri Base(string ip, int port)
@@ -316,6 +339,70 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false) 
             .ConfigureAwait(false) ?? throw new InvalidDataException("对方未返回本地更新源资料。");
     }
 
+    public async Task<GitSyncResponse> SyncGitAsync(PeerInfo peer, IReadOnlyList<GitProjectEvent> events,
+        IReadOnlyList<GitLineVersion> known,
+        CancellationToken cancellationToken = default)
+    {
+        await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        using var response = await gitHttp.PostAsJsonAsync(Route(peer, "git/sync"),
+            new GitSyncRequest(events.ToArray(), known.ToArray()), Json, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<GitSyncResponse>(Json, cancellationToken).ConfigureAwait(false)
+               ?? throw new InvalidDataException("对方未返回 Git 协作记录。");
+    }
+
+    public async Task<string> DownloadGitBundleAsync(PeerInfo peer, GitBundleInfo bundle,
+        CancellationToken cancellationToken = default)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(bundle.Hash, "^[0-9a-f]{64}$") ||
+            bundle.Size is <= 0 or > 1024L * 1024 * 1024)
+            throw new InvalidDataException("协作包资料无效。");
+        await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        Directory.CreateDirectory(Path.GetDirectoryName(bundle.Path)!);
+        var temporary = bundle.Path + ".download";
+        var offset = File.Exists(temporary) ? new FileInfo(temporary).Length : 0;
+        if (offset > bundle.Size) { File.Delete(temporary); offset = 0; }
+        if (offset == bundle.Size && await GitBundleFile.VerifyAsync(temporary, bundle.Hash,
+                bundle.Size, cancellationToken).ConfigureAwait(false))
+        {
+            File.Move(temporary, bundle.Path, true);
+            return bundle.Path;
+        }
+        if (offset == bundle.Size) { File.Delete(temporary); offset = 0; }
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            Route(peer, $"git/bundles/{Uri.EscapeDataString(bundle.Hash)}"));
+        if (offset > 0) request.Headers.Range = new RangeHeaderValue(offset, null);
+        using var response = await gitHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        if (offset > 0 && response.StatusCode != HttpStatusCode.PartialContent) offset = 0;
+        if (offset > 0 && response.Content.Headers.ContentRange?.From != offset)
+            throw new InvalidDataException("协作包续传的起点与请求不一致。");
+        await using (var output = new FileStream(temporary, offset == 0 ? FileMode.Create : FileMode.Append,
+                         FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous))
+        await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var buffer = new byte[1024 * 1024];
+            int read;
+            var total = offset;
+            while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                total += read;
+                if (total > bundle.Size) throw new InvalidDataException("协作包超过预期大小。");
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+        }
+        if (new FileInfo(temporary).Length != bundle.Size) throw new InvalidDataException("协作包下载不完整。");
+        if (!await GitBundleFile.VerifyAsync(temporary, bundle.Hash, bundle.Size,
+                cancellationToken).ConfigureAwait(false))
+        {
+            File.Delete(temporary);
+            throw new InvalidDataException("协作包 SHA-256 校验失败。");
+        }
+        File.Move(temporary, bundle.Path, true);
+        return bundle.Path;
+    }
+
     public async Task<IReadOnlyList<RemoteFile>> GetFilesAsync(PeerInfo peer, string resourceId,
         CancellationToken cancellationToken = default)
     {
@@ -344,5 +431,6 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false) 
     {
         http.Dispose();
         updateHttp.Dispose();
+        gitHttp.Dispose();
     }
 }

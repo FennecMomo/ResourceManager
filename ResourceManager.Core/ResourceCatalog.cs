@@ -65,6 +65,9 @@ public sealed class ResourceCatalog(NodeStore store)
 
     public RemoteResource Describe(LocalResource resource)
     {
+        if (IsGitMetadataPath(resource.SourcePath))
+            return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode,
+                0, resource.PublishedUtc, false, resource.Note);
         if (resource.Kind == ResourceKind.File)
         {
             var file = new FileInfo(resource.SourcePath);
@@ -105,6 +108,7 @@ public sealed class ResourceCatalog(NodeStore store)
     {
         foreach (var entry in Directory.EnumerateFileSystemEntries(Path.Combine(root, relative)))
         {
+            if (Path.GetFileName(entry).Equals(".git", StringComparison.OrdinalIgnoreCase)) continue;
             var attributes = File.GetAttributes(entry);
             if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
             var child = string.IsNullOrEmpty(relative) ? Path.GetFileName(entry) : Path.Combine(relative, Path.GetFileName(entry));
@@ -124,6 +128,7 @@ public sealed class ResourceCatalog(NodeStore store)
     public FileInfo ResolveFile(string resourceId, string? relativePath)
     {
         var resource = store.GetResource(resourceId) ?? throw new FileNotFoundException("资源已撤销。");
+        if (IsGitMetadataPath(resource.SourcePath)) throw new FileNotFoundException("Git 元数据不作为普通资源共享。");
         if (resource.Kind == ResourceKind.File)
         {
             if (!string.IsNullOrEmpty(relativePath)) throw new ArgumentException("文件资源不接受子路径。");
@@ -131,7 +136,8 @@ public sealed class ResourceCatalog(NodeStore store)
         }
         if (string.IsNullOrEmpty(relativePath)) throw new ArgumentException("请选择文件夹内的文件。");
         var parts = relativePath.Replace('\\', '/').Split('/');
-        if (parts.Any(p => p is "" or "." or ".." || p.Contains(':'))) throw new ArgumentException("路径无效。");
+        if (parts.Any(p => p is "" or "." or ".." || p.Contains(':') ||
+                           p.Equals(".git", StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("路径无效。");
         var root = Path.GetFullPath(resource.SourcePath);
         var current = root;
         foreach (var part in parts)
@@ -147,4 +153,8 @@ public sealed class ResourceCatalog(NodeStore store)
             throw new ArgumentException("路径超出已发布目录。");
         return new FileInfo(full);
     }
+
+    private static bool IsGitMetadataPath(string path) => Path.GetFullPath(path)
+        .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+        .Any(segment => segment.Equals(".git", StringComparison.OrdinalIgnoreCase));
 }
