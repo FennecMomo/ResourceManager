@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ResourceManager.Core\ResourceManager.Core.csproj" />
+    <ProjectReference Include="..\ResourceManager.Server\ResourceManager.Server.csproj" />
   </ItemGroup>
 
 </Project>

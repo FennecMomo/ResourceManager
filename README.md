@@ -14,6 +14,7 @@
 4. 如果设备隔着一台路由器，在“设置”的“当前路由器”栏保存该路由器的 WAN IPv4。软件会先检查已经保存的端口，再扫描固定范围 `48001–48099`，通过一台已映射的设备发现路由器内的其他 ResourceManager 设备。路由器内部设备可在同一卡片复制外部入口 IP。
 5. 文件夹下载会保留目录结构。网络中断后，到“下载”页选择任务并点击“继续任务”。进行中的任务可暂停并移除，相关临时内容会一并清理；移除已完成记录不会删除下载好的文件。
 6. 关闭窗口默认缩到托盘，继续共享；从托盘菜单选择“退出并停止共享”才会离线。可以在“设置”中更改关闭行为。
+7. 在“反馈”页选择分类、填写标题和正文。点击标题栏中的“刷新”即可发现局域网服务端并将其放到投送目标第一项，无需配对或授权码；也可以选择使用用户自己的 GitHub 账号授权提交到本项目。服务端目标支持白名单附件，GitHub 目标不支持附件。
 
 “设置”中可以开启当前用户的 Windows 开机启动。开启后，登录 Windows 时程序会直接在系统托盘运行并开始共享，无需管理员权限；关闭该选项会移除启动项。自动检查更新默认关闭，手动检查可随时使用。检查更新时会同时查询本项目的 GitHub Release 和已连接设备提供的本地源；任何设备只要把带正式文件版本信息的 `ResourceManager.exe`（也支持 `ResourceManager-系统.模块.修改.exe`）作为文件资源发布，就能为其他已连接设备提供局域网更新。本地源会公布内嵌版本、包体大小和 SHA-256，接收端下载后会重新计算并核对；若 GitHub 存在同版本，则只有 SHA-256 与官方发布包一致的本地副本才会被使用。尚无法由 GitHub 确认的本地版本不会自动安装，必须手动检查并确认信任发布设备。校验通过后，安装助手会等待旧进程完全退出，再替换 EXE 并按需重启，避免单实例互斥导致新版启动失败。更新不会覆盖 `%LOCALAPPDATA%\ResourceManager` 中的设备资料、资源记录和下载记录。0.3.1 及更早版本在下载校验阶段存在缺陷，无法在软件内自动更新到 0.3.2，请手动下载并替换 EXE；从 0.3.2 起自动更新恢复可用。源码调试版本不会自我更新，请使用打包后的单文件 EXE 验证更新。
 
@@ -37,6 +38,12 @@
 
 本机资料、设备、发布记录、收藏和下载任务保存在 `%LOCALAPPDATA%\ResourceManager`。复制发布的文件也保存在此目录的 `library` 子目录中。软件不会公开未发布的路径；撤销复制发布时会删除这份管理副本。
 
+### 反馈服务端
+
+`ResourceManager.Server` 是独立版本的局域网反馈服务，首版版本为 `0.0.1`，不与客户端 `0.3.5` 对应。服务端公开反馈 API 默认监听 TCP `37644`，自动发现监听 UDP `37645`，管理页只在服务端本机的 `http://127.0.0.1:37646/admin/` 提供。局域网用户无需配对即可直接提交；管理页可以查看和处理本地反馈，并使用维护者自己的 GitHub 授权绑定一个仓库。
+
+服务端首版使用可信局域网 HTTP，反馈正文、附件和用于区分提交者的随机客户端标识没有传输层加密。不要把 `37644` 映射到公网，并把 Windows 防火墙访问范围限制在专用网络。完整部署和 GitHub App 配置见 [服务端说明](ResourceManager.Server/README.md)。
+
 ## 开发与验证
 
 仅支持 Windows 桌面运行。使用 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)，在项目根目录执行：
@@ -45,12 +52,13 @@
 dotnet build .\ResourceManager.slnx
 dotnet test .\ResourceManager.Tests\ResourceManager.Tests.csproj
 dotnet publish .\ResourceManager.App\ResourceManager.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o .\dist\win-x64
+dotnet publish .\ResourceManager.Server\ResourceManager.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o .\dist\server-win-x64
 ```
 
-项目分为 WPF 桌面程序、节点核心层和集成测试。核心层使用 SQLite 保存本机状态，使用 UDP `37643` 端口发现局域网设备，通过 SSDP 和标准 UPnP IGD 管理可选的 TCP 映射，并通过应用内 HTTP 接口交换设备资料、资源目录和文件内容。测试会验证自动发现、互认、资源模式、文件与文件夹下载、任务清理、离线收藏、撤销资源、路径边界、断点续传、旧数据库升级、多设备共享 WAN IP、缓存入口优先和 NAT 拨号端口保留。
+项目分为 WPF 桌面程序、节点核心层、独立 ASP.NET Core 服务端和集成测试。核心层使用 SQLite 保存本机状态，使用 UDP `37643` 端口发现局域网设备，通过 SSDP 和标准 UPnP IGD 管理可选的 TCP 映射，并通过应用内 HTTP 接口交换设备资料、资源目录和文件内容。测试还覆盖反馈验证、草稿与历史、免配对局域网提交、幂等提交和软关闭。
 
 ## 版本与许可
 
-当前版本为 `0.3.4`，版本号格式为 `系统.模块.修改`，Git 提交信息须带上对应的版本号。发布版本使用同号的 `v系统.模块.修改` Git 标签；标签推送后，GitHub Actions 会构建、测试并创建带单文件 EXE 的 GitHub Release。图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows 图标。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
+当前客户端版本为 `0.3.5`，服务端版本为 `0.0.1`，两者独立演进。客户端发布使用 `v系统.模块.修改` 标签，服务端发布使用 `server-v系统.模块.修改` 标签。图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows 图标。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
 
 后续需求、拆分版本和验收场景记录在 [开发待办与版本路线](docs/roadmap.md)。

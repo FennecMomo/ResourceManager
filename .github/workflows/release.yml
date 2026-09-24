@@ -4,12 +4,14 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "server-v*.*.*"
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  client-release:
+    if: startsWith(github.ref_name, 'v')
     runs-on: windows-latest
     steps:
       - name: 读取发布源码
@@ -37,10 +39,45 @@ jobs:
         run: dotnet test ResourceManager.Tests/ResourceManager.Tests.csproj -c Release
 
       - name: 构建 Windows x64 单文件程序
-        run: dotnet publish ResourceManager.App/ResourceManager.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o dist/release
+        run: dotnet publish ResourceManager.App/ResourceManager.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:ResourceManagerGitHubClientId=${{ vars.RESOURCE_MANAGER_GITHUB_CLIENT_ID }} -o dist/release
 
       - name: 发布 GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create $env:GITHUB_REF_NAME dist/release/ResourceManager.exe --title "ResourceManager $env:GITHUB_REF_NAME" --notes-from-tag --verify-tag
+
+  server-release:
+    if: startsWith(github.ref_name, 'server-v')
+    runs-on: windows-latest
+    steps:
+      - name: 读取发布源码
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: 准备 .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: 核对服务端标签与项目版本
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          [xml]$project = Get-Content ResourceManager.Server/ResourceManager.Server.csproj
+          $version = ($project.Project.PropertyGroup | Where-Object Version).Version
+          if ($env:RELEASE_TAG -ne "server-v$version") {
+            throw "标签 $env:RELEASE_TAG 与服务端项目版本 $version 不一致。"
+          }
+      - name: 测试
+        run: dotnet test ResourceManager.Tests/ResourceManager.Tests.csproj -c Release
+      - name: 构建 Windows x64 服务端
+        run: dotnet publish ResourceManager.Server/ResourceManager.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o dist/server
+      - name: 打包服务端
+        shell: pwsh
+        run: Compress-Archive -Path dist/server/*,ResourceManager.Server/README.md -DestinationPath dist/ResourceManager.Server-win-x64.zip
+      - name: 发布服务端 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME dist/ResourceManager.Server-win-x64.zip --title "ResourceManager Server $env:GITHUB_REF_NAME" --notes-from-tag --verify-tag

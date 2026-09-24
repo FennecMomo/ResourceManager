@@ -24,11 +24,19 @@ jobs:
         run: dotnet build ResourceManager.slnx -c Release --no-restore
       - name: Test
         run: dotnet test ResourceManager.Tests/ResourceManager.Tests.csproj -c Release --no-build
-      - name: Publish Windows x64
-        run: dotnet publish ResourceManager.App/ResourceManager.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o dist/win-x64
+      - name: Publish Windows x64 client
+        run: dotnet publish ResourceManager.App/ResourceManager.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:ResourceManagerGitHubClientId=${{ vars.RESOURCE_MANAGER_GITHUB_CLIENT_ID }} -o dist/win-x64
+      - name: Publish Windows x64 server
+        run: dotnet publish ResourceManager.Server/ResourceManager.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o dist/server-win-x64
       - uses: actions/upload-artifact@v7
         with:
           name: ResourceManager-win-x64
           path: dist/win-x64/ResourceManager.exe
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ResourceManager-Server-win-x64
+          path: dist/server-win-x64
           if-no-files-found: error
           retention-days: 14

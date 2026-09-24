@@ -68,6 +68,75 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Padding" Value="12,9"/>
+            <Setter Property="Margin" Value="4,2"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBorder" Background="Transparent" CornerRadius="7" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#F1F5FB"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="ItemBorder" Property="Background" Value="#EAF2FF"/><Setter Property="Foreground" Value="{StaticResource Accent}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="ItemBorder" Property="Opacity" Value="0.45"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Padding" Value="12,0,38,0"/>
+            <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#DCE4EE"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="InputBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9">
+                                <Grid>
+                                    <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center"
+                                                      HorizontalAlignment="Left" Content="{TemplateBinding SelectionBoxItem}"
+                                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                      ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"/>
+                                    <TextBlock Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="11" Foreground="{StaticResource Muted}"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,13,0"/>
+                                </Grid>
+                            </Border>
+                            <ToggleButton Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="Transparent"/></ControlTemplate></ToggleButton.Template>
+                            </ToggleButton>
+                            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
+                                   AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
+                                <Border Margin="0,6,0,8" Padding="2" Background="White" BorderBrush="#DCE4EE" BorderThickness="1"
+                                        CornerRadius="10" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="5" Opacity="0.16" Color="#24405F"/></Border.Effect>
+                                    <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                                  CanContentScroll="False"><ItemsPresenter/></ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="InputBorder" Property="BorderBrush" Value="#AFC4E4"/></Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="InputBorder" Property="BorderBrush" Value="{StaticResource Accent}"/><Setter TargetName="InputBorder" Property="BorderThickness" Value="1.5"/></Trigger>
+                            <Trigger Property="IsDropDownOpen" Value="True"><Setter TargetName="InputBorder" Property="BorderBrush" Value="{StaticResource Accent}"/><Setter TargetName="InputBorder" Property="Background" Value="#F8FBFF"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="InputBorder" Property="Opacity" Value="0.5"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/>
             <Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="14"/>
@@ -111,6 +180,8 @@
             <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/>
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
             <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="ScrollViewer.CanContentScroll" Value="False"/>
+            <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel"/>
             <Setter Property="ItemContainerStyle" Value="{StaticResource CardItem}"/>
         </Style>
         <Style x:Key="NavItem" TargetType="ListBoxItem">
@@ -164,6 +235,50 @@
                 <DataTrigger Binding="{Binding Status}" Value="已中断"><Setter Property="Foreground" Value="#B74650"/></DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="FeedbackCategoryBadge" TargetType="Border">
+            <Setter Property="Background" Value="#EDF2F8"/><Setter Property="BorderBrush" Value="#DCE4EE"/>
+            <Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="9"/><Setter Property="Padding" Value="7,2"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CategoryKey}" Value="Problem"><Setter Property="Background" Value="#FFF0F1"/><Setter Property="BorderBrush" Value="#F0C0C5"/></DataTrigger>
+                <DataTrigger Binding="{Binding CategoryKey}" Value="Suggestion"><Setter Property="Background" Value="#EAF2FF"/><Setter Property="BorderBrush" Value="#B9CFF7"/></DataTrigger>
+                <DataTrigger Binding="{Binding CategoryKey}" Value="Experience"><Setter Property="Background" Value="#F1EDFF"/><Setter Property="BorderBrush" Value="#D7CBF5"/></DataTrigger>
+                <DataTrigger Binding="{Binding CategoryKey}" Value="Other"><Setter Property="Background" Value="#FFF5E7"/><Setter Property="BorderBrush" Value="#EBD1A7"/></DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="FeedbackCategoryText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#58677A"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CategoryKey}" Value="Problem"><Setter Property="Foreground" Value="#B74650"/></DataTrigger>
+                <DataTrigger Binding="{Binding CategoryKey}" Value="Suggestion"><Setter Property="Foreground" Value="#2867D9"/></DataTrigger>
+                <DataTrigger Binding="{Binding CategoryKey}" Value="Experience"><Setter Property="Foreground" Value="#6D4FC2"/></DataTrigger>
+                <DataTrigger Binding="{Binding CategoryKey}" Value="Other"><Setter Property="Foreground" Value="#91601F"/></DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="FeedbackStatusBadge" TargetType="Border">
+            <Setter Property="Background" Value="#EDF0F4"/><Setter Property="BorderBrush" Value="#D7DDE6"/>
+            <Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="9,3"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Submitting"><Setter Property="Background" Value="#EAF2FF"/><Setter Property="BorderBrush" Value="#B9CFF7"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="PendingReview"><Setter Property="Background" Value="#FFF5DB"/><Setter Property="BorderBrush" Value="#EFD695"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Accepted"><Setter Property="Background" Value="#F1EDFF"/><Setter Property="BorderBrush" Value="#D7CBF5"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Open"><Setter Property="Background" Value="#F1EDFF"/><Setter Property="BorderBrush" Value="#D7CBF5"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Rejected"><Setter Property="Background" Value="#FFF0F1"/><Setter Property="BorderBrush" Value="#F0C0C5"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Failed"><Setter Property="Background" Value="#FFF0F1"/><Setter Property="BorderBrush" Value="#F0C0C5"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Completed"><Setter Property="Background" Value="#E8F7F1"/><Setter Property="BorderBrush" Value="#B7E2D2"/></DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="FeedbackStatusText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#637083"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Submitting"><Setter Property="Foreground" Value="#2867D9"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="PendingReview"><Setter Property="Foreground" Value="#8B6015"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Accepted"><Setter Property="Foreground" Value="#6D4FC2"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Open"><Setter Property="Foreground" Value="#6D4FC2"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Rejected"><Setter Property="Foreground" Value="#B74650"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Failed"><Setter Property="Foreground" Value="#B74650"/></DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Completed"><Setter Property="Foreground" Value="#18765A"/></DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style TargetType="TabControl">
             <Setter Property="Template">
                 <Setter.Value><ControlTemplate TargetType="TabControl"><ContentPresenter ContentSource="SelectedContent"/></ControlTemplate></Setter.Value>
@@ -189,14 +304,51 @@
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="我的发布"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE734;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="收藏"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="下载"/></StackPanel></ListBoxItem>
+                    <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE939;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="反馈"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="设置"/></StackPanel></ListBoxItem>
                 </ListBox>
-                <Border Grid.Row="3" Background="#F4F8FE" CornerRadius="12" Padding="14">
-                    <StackPanel>
-                        <TextBlock Text="只分享你选择的资源" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                        <TextBlock Text="关闭窗口后可继续在托盘共享；退出时会停止。" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"/>
-                    </StackPanel>
-                </Border>
+                <StackPanel Grid.Row="3">
+                    <Button x:Name="SidebarUpdateButton" Click="SidebarUpdate_Click" Height="Auto" Padding="13"
+                            Background="#F4F8FE" BorderBrush="#DDE8F6" BorderThickness="1"
+                            HorizontalContentAlignment="Stretch" IsEnabled="False" ToolTip="正在等待首次更新检查">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="UpdateButtonBorder" Background="{TemplateBinding Background}"
+                                        BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                                        CornerRadius="12" Padding="{TemplateBinding Padding}">
+                                    <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="UpdateButtonBorder" Property="Opacity" Value="0.88"/></Trigger>
+                                    <Trigger Property="IsPressed" Value="True"><Setter TargetName="UpdateButtonBorder" Property="Opacity" Value="0.72"/></Trigger>
+                                    <Trigger Property="IsEnabled" Value="False"><Setter TargetName="UpdateButtonBorder" Property="Opacity" Value="0.72"/></Trigger>
+                                    <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="UpdateButtonBorder" Property="BorderBrush" Value="#8DB4FF"/><Setter TargetName="UpdateButtonBorder" Property="BorderThickness" Value="2"/></Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Border x:Name="SidebarUpdateIconBadge" Width="28" Height="28" CornerRadius="8" Background="#E5EEF9" HorizontalAlignment="Left">
+                                <TextBlock x:Name="SidebarUpdateIconText" Text="&#xE895;" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                                           Foreground="#4E6F9C" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="8,0,5,0" VerticalAlignment="Center">
+                                <TextBlock x:Name="SidebarUpdateTitleText" Text="正在检查更新" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Ink}" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock x:Name="SidebarUpdateDetailText" Text="正在读取当前版本" Style="{StaticResource Caption}"
+                                           Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <TextBlock x:Name="SidebarUpdateChevron" Grid.Column="2" Text="&#xE76C;" FontFamily="Segoe MDL2 Assets"
+                                       FontSize="11" Foreground="#8091A8" VerticalAlignment="Center" Visibility="Collapsed"/>
+                        </Grid>
+                    </Button>
+                    <Border Background="#F4F8FE" CornerRadius="12" Padding="14" Margin="0,10,0,0">
+                        <StackPanel>
+                            <TextBlock Text="只分享你选择的资源" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
+                            <TextBlock Text="关闭窗口后可继续在托盘共享；退出时会停止。" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
             </Grid>
         </Border>
 
@@ -329,6 +481,104 @@
                     </Grid>
                 </TabItem>
 
+                <TabItem Header="反馈">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="28,23,28,22" Width="780" HorizontalAlignment="Left">
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,18">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="提交反馈" Style="{StaticResource PageHeading}"/>
+                                            <TextBlock Text="选择投送目标后填写反馈内容" Style="{StaticResource Caption}" Margin="0,5,0,0"/>
+                                        </StackPanel>
+                                        <ComboBox x:Name="FeedbackTargetBox" Grid.Column="1" Width="280" Margin="18,0,8,0"
+                                                  DisplayMemberPath="Display" SelectionChanged="FeedbackTargetBox_SelectionChanged"/>
+                                        <Button x:Name="FeedbackRefreshTargetsButton" Grid.Column="2" Content="刷新" Style="{StaticResource SecondaryButton}" Click="FeedbackRefreshTargets_Click"/>
+                                    </Grid>
+                                    <TextBlock x:Name="FeedbackTargetStatusText" Text="点击刷新查找局域网服务端" Style="{StaticResource Caption}" Margin="0,13,0,0" TextWrapping="Wrap"/>
+
+                                    <Border x:Name="FeedbackGithubAuthorizationPanel" Visibility="Collapsed" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,18,0,0" Padding="0,18,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="GitHub 账号授权" Style="{StaticResource CardHeading}"/>
+                                            <TextBlock Text="使用当前用户自己的 GitHub 授权，不内置共享密钥。固定投送到 FennecMomo/ResourceManager。" Style="{StaticResource Caption}" Margin="0,4,0,10" TextWrapping="Wrap"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button x:Name="FeedbackGithubLoginButton" Content="登录 GitHub" Click="FeedbackGithubLogin_Click" Margin="0,0,8,0"/>
+                                                <Button x:Name="FeedbackGithubLogoutButton" Content="退出" Click="FeedbackGithubLogout_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/>
+                                                <TextBlock x:Name="FeedbackGithubStatusText" Text="尚未登录" Style="{StaticResource Caption}" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <TextBlock x:Name="FeedbackGithubCodeText" Style="{StaticResource Caption}" Foreground="{StaticResource Accent}" Margin="0,8,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,18">
+                                <StackPanel>
+                                    <TextBlock Text="分类" Style="{StaticResource Caption}" Margin="0,0,0,6"/>
+                                    <ComboBox x:Name="FeedbackCategoryBox" Height="38" SelectionChanged="FeedbackDraftChanged">
+                                        <ComboBoxItem Content="问题" Tag="Problem" IsSelected="True"/><ComboBoxItem Content="建议" Tag="Suggestion"/>
+                                        <ComboBoxItem Content="体验" Tag="Experience"/><ComboBoxItem Content="其他" Tag="Other"/>
+                                    </ComboBox>
+                                    <TextBlock Text="标题" Style="{StaticResource Caption}" Margin="0,16,0,6"/>
+                                    <TextBox x:Name="FeedbackTitleBox" MaxLength="120" TextChanged="FeedbackDraftChanged"/>
+                                    <TextBlock Text="正文" Style="{StaticResource Caption}" Margin="0,16,0,6"/>
+                                    <TextBox x:Name="FeedbackBodyBox" Height="180" MaxLength="10000" AcceptsReturn="True" TextWrapping="Wrap"
+                                             VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Padding="11,9" TextChanged="FeedbackDraftChanged"/>
+                                    <Grid Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="附件" Style="{StaticResource Caption}"/><TextBlock Text="仅局域网服务端目标支持附件；最多 10 个，总计 50 MB。" Style="{StaticResource Caption}" Margin="0,4,0,0"/></StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="添加附件" Click="FeedbackAddAttachments_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"/><Button Content="移除所选" Click="FeedbackRemoveAttachment_Click" Style="{StaticResource QuietButton}"/></StackPanel>
+                                    </Grid>
+                                    <ListBox x:Name="FeedbackAttachmentList" ItemsSource="{Binding FeedbackAttachments}" Height="100" Margin="0,10,0,0">
+                                        <ListBox.ItemTemplate><DataTemplate><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="1" Text="{Binding SizeText}" Style="{StaticResource Caption}" Margin="12,0,0,0"/></Grid></DataTemplate></ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <Border Background="#F4F8FE" CornerRadius="10" Padding="12" Margin="0,14,0,0">
+                                        <TextBlock x:Name="FeedbackEnvironmentText" Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+                                    </Border>
+                                    <Grid Margin="0,18,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock x:Name="FeedbackSubmitStatusText" Text="草稿会自动保存" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                        <Button x:Name="FeedbackSubmitButton" Grid.Column="1" Content="提交反馈" Click="FeedbackSubmit_Click"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="提交历史" Style="{StaticResource CardHeading}"/><TextBlock Text="处理中记录不能删除；完成或由你关闭后才能删除本地记录。" Style="{StaticResource Caption}" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="刷新状态" Click="FeedbackRefreshHistory_Click" Style="{StaticResource SecondaryButton}"/></Grid>
+                                    <ListBox x:Name="FeedbackHistoryList" Grid.Row="1" ItemsSource="{Binding FeedbackHistory}" Height="250" Margin="0,14,0,0" SelectionChanged="FeedbackHistoryList_SelectionChanged">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title, Mode=OneWay}" Style="{StaticResource ItemTitle}"/>
+                                                        <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                                            <Border Style="{StaticResource FeedbackCategoryBadge}"><TextBlock Text="{Binding CategoryText, Mode=OneWay}" Style="{StaticResource FeedbackCategoryText}"/></Border>
+                                                            <TextBlock Text="{Binding TargetName, Mode=OneWay}" Style="{StaticResource Meta}" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text=" · " Style="{StaticResource Meta}" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="{Binding CreatedText, Mode=OneWay}" Style="{StaticResource Meta}" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                        <TextBlock Text="{Binding Error, Mode=OneWay}" Foreground="#B74650" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                                    </StackPanel>
+                                                    <Border Grid.Column="1" Style="{StaticResource FeedbackStatusBadge}" Margin="12,0,0,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding StatusText, Mode=OneWay}" Style="{StaticResource FeedbackStatusText}"/>
+                                                    </Border>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                                        <Button x:Name="FeedbackOpenRemoteButton" Content="打开远端" Click="FeedbackOpenRemote_Click" Style="{StaticResource SecondaryButton}" IsEnabled="False" Margin="0,0,8,0"/>
+                                        <Button x:Name="FeedbackCloseButton" Content="关闭反馈" Click="FeedbackClose_Click" IsEnabled="False" Margin="0,0,8,0"/>
+                                        <Button x:Name="FeedbackDeleteHistoryButton" Content="删除本地记录" Click="FeedbackDeleteHistory_Click" Style="{StaticResource DangerButton}" IsEnabled="False"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
                 <TabItem Header="设置">
                     <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="28,23,28,22" Width="700" HorizontalAlignment="Left">
                         <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
@@ -378,8 +628,7 @@
                             </Grid>
                         </StackPanel></Border>
                         <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
-                            <TextBlock Text="软件更新" Style="{StaticResource PageHeading}"/><TextBlock Text="从 GitHub 或已连接设备发布的 ResourceManager 程序下载更新；安装前会核对版本、大小和 SHA-256。" Style="{StaticResource Caption}" Margin="0,5,0,22" TextWrapping="Wrap"/>
-                            <CheckBox x:Name="AutoUpdateBox" Content="启动后自动检查更新" FontSize="13" Foreground="{StaticResource Ink}" Margin="0,0,0,12"/>
+                            <TextBlock Text="软件更新" Style="{StaticResource PageHeading}"/><TextBlock Text="每次启动会自动检查一次；仅在发现新版本时提醒，由你决定何时下载和安装。安装前会核对版本、大小和 SHA-256。" Style="{StaticResource Caption}" Margin="0,5,0,22" TextWrapping="Wrap"/>
                             <StackPanel Orientation="Horizontal"><Button x:Name="CheckUpdateButton" Content="检查更新" Click="CheckUpdate_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/><TextBlock x:Name="UpdateStatusText" Text="当前版本" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/></StackPanel>
                         </StackPanel></Border>
                         <Button Content="保存设置" Click="SaveSettings_Click" HorizontalAlignment="Left" Margin="0,0,0,20"/>

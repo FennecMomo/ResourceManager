@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="ResourceManager.App/ResourceManager.App.csproj" />
   <Project Path="ResourceManager.Core/ResourceManager.Core.csproj" />
+  <Project Path="ResourceManager.Server/ResourceManager.Server.csproj" />
   <Project Path="ResourceManager.Tests/ResourceManager.Tests.csproj" />
 </Solution>

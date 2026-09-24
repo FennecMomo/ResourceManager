@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ResourceManager Server</title>
+  <link rel="stylesheet" href="/admin/styles.css">
+</head>
+<body>
+  <aside>
+    <div class="brand"><div class="logo">R</div><div><strong>资源管理器</strong><small>服务端管理</small></div></div>
+    <nav><button class="active">☷ <span>Issue</span></button></nav>
+    <div class="trust"><strong>可信局域网</strong><p>提交接口使用 HTTP，请勿映射到公网。</p></div>
+  </aside>
+  <main>
+    <header><div><h1>Issue</h1><p>统一查看本地反馈与一个 GitHub 仓库</p></div><div class="server"><strong id="serverName">正在读取…</strong><small id="serverVersion"></small></div></header>
+    <section class="toolbar card">
+      <select id="sourceFilter"><option value="all">全部来源</option><option value="local">本地反馈</option><option value="github">GitHub</option></select>
+      <select id="categoryFilter"><option value="all">全部分类</option><option value="Problem">问题</option><option value="Suggestion">建议</option><option value="Experience">体验</option><option value="Other">其他</option><option value="none">未分类</option></select>
+      <select id="statusFilter">
+        <option value="active" selected>处理中</option>
+        <option value="all">全部状态</option>
+        <option value="PendingReview">待接受</option>
+        <option value="Accepted">已接受</option>
+        <option value="Rejected">已拒绝</option>
+        <option value="Completed">已完成</option>
+        <option value="UserClosed">用户已关闭</option>
+      </select>
+      <input id="search" placeholder="搜索标题或正文">
+      <button id="refresh">刷新</button>
+      <button id="settingsButton" class="secondary">GitHub 设置</button>
+    </section>
+    <section class="workspace">
+      <div class="card issue-list"><div id="issueList" class="list"></div><div id="empty" class="empty">还没有 Issue。</div></div>
+      <div class="card detail" id="detail"><div class="empty">从左侧选择一条 Issue。</div></div>
+    </section>
+  </main>
+
+  <dialog id="settingsDialog">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-title"><div><h2>GitHub 设置</h2><p>登录维护者账号并绑定需要统一处理的仓库</p></div><button value="cancel" class="quiet">关闭</button></div>
+      <div class="setting-block">
+        <h3>GitHub 仓库</h3>
+        <p id="githubStatus">正在读取…</p>
+        <div class="row"><button type="button" id="githubLogin">登录 GitHub</button><button type="button" id="githubLogout" class="secondary">退出</button></div>
+        <div class="repo-grid"><input id="repoOwner" placeholder="仓库所有者"><input id="repoName" placeholder="仓库名称"><button type="button" id="bindRepo">绑定仓库</button></div>
+        <p id="githubHint" class="hint"></p>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="rejectionDialog">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-title"><div><h2>拒绝反馈</h2><p>拒绝原因会被永久保存在这条本地反馈中</p></div><button value="cancel" class="quiet">关闭</button></div>
+      <div class="setting-block">
+        <label for="rejectionReason">拒绝原因</label>
+        <textarea id="rejectionReason" maxlength="1000" placeholder="请说明无法接受或不计划处理这条反馈的原因"></textarea>
+        <p id="rejectionHint" class="hint">必填，最多 1000 个字符。</p>
+        <div class="dialog-actions"><button type="button" id="cancelRejection" class="secondary">取消</button><button type="button" id="confirmRejection" class="action-rejected">确认拒绝</button></div>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" role="status"></div>
+  <script src="/admin/app.js"></script>
+</body>
+</html>
