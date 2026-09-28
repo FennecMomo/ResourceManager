@@ -88,12 +88,15 @@ public partial class MainWindow : Window
     public ObservableCollection<FeedbackHistoryRow> FeedbackHistory { get; } = [];
     public ObservableCollection<FeedbackTargetOption> FeedbackTargets { get; } = [];
 
-    public MainWindow(bool startedWithWindows = false)
+    public MainWindow(bool startedWithWindows = false) : this(startedWithWindows, null, true) { }
+
+    internal MainWindow(bool startedWithWindows, SettingsEditorServices? services, bool desktopIntegration)
     {
+        settingsServices = services;
         this.startedWithWindows = startedWithWindows;
         feedbackSecrets = new FeedbackSecretStore(NodeDefaults.DataDirectory);
         InitializeComponent();
-        InitializeStorage();
+        if (desktopIntegration) InitializeStorage();
         PreviewMouseWheel += MainWindow_PreviewMouseWheel;
         if (startedWithWindows)
         {
@@ -121,12 +124,13 @@ public partial class MainWindow : Window
         NicknameBox.Text = settings.Profile.Nickname;
         ListenPortBox.Text = settings.ListenPort.ToString();
         CloseToTrayBox.IsChecked = settings.CloseToTray;
-        AutoStartBox.IsChecked = AutoStartManager.IsEnabled();
+        AutoStartBox.IsChecked = ReadAutoStart();
         DeviceIdText.Text = settings.Profile.DeviceId;
         UpdateStatusText.Text = $"当前版本 v{AppVersion}";
         SetSidebarUpdateState(UpdateIndicatorState.Checking);
         pendingAvatar = settings.Profile.Avatar;
         AvatarPreview.Source = AvatarImage(pendingAvatar);
+        InitializeSettingsEditor();
         UpdateIdentity();
         using var source = Assembly.GetExecutingAssembly().GetManifestResourceStream("ResourceManager.AppIcon.ico")
             ?? throw new InvalidOperationException("缺少应用图标资源。");
@@ -140,7 +144,7 @@ public partial class MainWindow : Window
         {
             Icon = appIcon,
             Text = "资源管理器",
-            Visible = true,
+            Visible = desktopIntegration,
             ContextMenuStrip = new WinForms.ContextMenuStrip()
         };
         tray.ContextMenuStrip.Items.Add("打开资源管理器", null, (_, _) => Dispatcher.Invoke(ShowWindow));
@@ -360,13 +364,19 @@ public partial class MainWindow : Window
 
     private void RefreshGatewaysView(string? selectId = null)
     {
-        var selected = selectId ?? (GatewayList?.SelectedItem as GatewayRow)?.Gateway.Id;
-        Gateways.Clear();
-        foreach (var gateway in store.GetGateways())
-            Gateways.Add(new GatewayRow(gateway, gateway.Name, gateway.WanIp,
-                $"端口 {gateway.PortStart}–{gateway.PortEnd}", gateway.LastStatus ?? "未检查"));
-        if (GatewayList is null) return;
-        GatewayList.SelectedItem = Gateways.FirstOrDefault(item => item.Gateway.Id == selected);
+        var preserveDraft = HasUnsavedGateway;
+        var selected = preserveDraft ? savedGatewayId : selectId ?? savedGatewayId;
+        refreshingGatewaySelection = true;
+        try
+        {
+            Gateways.Clear();
+            foreach (var gateway in store.GetGateways())
+                Gateways.Add(new GatewayRow(gateway, gateway.Name, gateway.WanIp,
+                    $"端口 {gateway.PortStart}–{gateway.PortEnd}", gateway.LastStatus ?? "未检查"));
+            GatewayList.SelectedItem = Gateways.FirstOrDefault(item => item.Gateway.Id == selected);
+            if (!preserveDraft) LoadGatewayEditor((GatewayList.SelectedItem as GatewayRow)?.Gateway);
+        }
+        finally { refreshingGatewaySelection = false; }
     }
 
     private void RefreshSelectedResources()
@@ -527,7 +537,10 @@ public partial class MainWindow : Window
 
     private async void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!ReferenceEquals(e.OriginalSource, Tabs) || NavList is null) return;
+        if (!ReferenceEquals(e.OriginalSource, Tabs) || NavList is null || restoringSettingsPage) return;
+        var targetPage = Tabs.SelectedIndex;
+        if (!await CanNavigateFromSettingsAsync(targetPage)) return;
+        currentPageIndex = targetPage;
         if (NavList.SelectedIndex != Tabs.SelectedIndex) NavList.SelectedIndex = Tabs.SelectedIndex;
         UpdatePageHeader();
         if (!IsLoaded) return;
@@ -636,6 +649,7 @@ public partial class MainWindow : Window
             var ip = GatewayIpBox.Text.Trim();
             var existing = store.GetGateways().FirstOrDefault(item => item.WanIp == ip);
             var gateway = store.SaveGateway(name, ip, existing?.Id);
+            LoadGatewayEditor(gateway);
             RefreshGatewaysView(gateway.Id);
             await RefreshGatewayAsync(gateway);
         }
@@ -652,6 +666,7 @@ public partial class MainWindow : Window
         try
         {
             var gateway = store.SaveGateway(GatewayNameBox.Text, GatewayIpBox.Text, row.Gateway.Id);
+            LoadGatewayEditor(gateway);
             RefreshGatewaysView(gateway.Id);
             await RefreshGatewayAsync(gateway);
         }
@@ -719,10 +734,19 @@ public partial class MainWindow : Window
 
     private void GatewayList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (GatewayList.SelectedItem is not GatewayRow row) return;
-        GatewayNameBox.Text = row.Gateway.Name;
-        GatewayIpBox.Text = row.Gateway.WanIp;
-        GatewayProgressText.Text = row.Gateway.LastStatus ?? "未检查";
+        if (refreshingGatewaySelection) return;
+        var target = (GatewayList.SelectedItem as GatewayRow)?.Gateway;
+        if (HasUnsavedGateway)
+        {
+            refreshingGatewaySelection = true;
+            try { GatewayList.SelectedItem = Gateways.FirstOrDefault(item => item.Gateway.Id == savedGatewayId); }
+            finally { refreshingGatewaySelection = false; }
+            var choice = ConfirmSettingsLeave("路由器入口有未保存的修改。");
+            if (choice == SettingsLeaveChoice.KeepEditing) return;
+            if (choice == SettingsLeaveChoice.Save && !SaveGatewayDraft()) return;
+        }
+        LoadGatewayEditor(target);
+        RefreshGatewaysView(target?.Id);
     }
 
     private void RemoveGateway_Click(object sender, RoutedEventArgs e)
@@ -731,6 +755,7 @@ public partial class MainWindow : Window
         var affected = store.GetPeerEndpoints(gatewayId: row.Gateway.Id)
             .Select(item => item.DeviceId).Distinct(StringComparer.Ordinal).ToArray();
         store.RemoveGateway(row.Gateway.Id);
+        LoadGatewayEditor(null);
         foreach (var deviceId in affected)
         {
             peerStatus[deviceId] = "离线";
@@ -1158,11 +1183,12 @@ public partial class MainWindow : Window
             pendingAvatar = output.ToArray();
             if (pendingAvatar.Length > 512 * 1024) throw new InvalidDataException("头像压缩后仍超过 512 KB，请换一张图片。");
             AvatarPreview.Source = AvatarImage(pendingAvatar);
+            UpdateSettingsSaveHint();
         }
         catch (Exception ex) { ShowError("读取头像失败", ex); }
     }
 
-    private void ClearAvatar_Click(object sender, RoutedEventArgs e) { pendingAvatar = null; AvatarPreview.Source = null; }
+    private void ClearAvatar_Click(object sender, RoutedEventArgs e) { pendingAvatar = null; AvatarPreview.Source = null; UpdateSettingsSaveHint(); }
 
     private async void CheckUpdate_Click(object sender, RoutedEventArgs e) => await CheckForUpdatesAsync(true);
 
@@ -1855,37 +1881,6 @@ public partial class MainWindow : Window
     {
         if ((FeedbackHistoryList.SelectedItem as FeedbackHistoryRow)?.Item.RemoteUrl is not { } url) return;
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-    }
-
-    private async void SaveSettings_Click(object sender, RoutedEventArgs e)
-    {
-        var previousAutoStart = AutoStartManager.IsEnabled();
-        try
-        {
-            if (!int.TryParse(ListenPortBox.Text, out var port)) throw new ArgumentException("监听端口无效。");
-            var previousPort = store.GetSettings().ListenPort;
-            AutoStartManager.SetEnabled(AutoStartBox.IsChecked == true);
-            store.SaveSettings(NicknameBox.Text, pendingAvatar, port, CloseToTrayBox.IsChecked == true, autoUpdate: true);
-            UpdateIdentity();
-            FeedbackEnvironmentText.Text = EnvironmentSummary();
-            if (!node.IsRunning || previousPort != port)
-            {
-                await discovery.StopAsync();
-                await node.StopAsync();
-                await node.StartAsync(port);
-            }
-            var discoveryReady = await TryStartDiscoveryAsync();
-            if (previousPort != port) await MaintainMappingsAsync();
-            SetStatus(discoveryReady
-                ? "设置已保存。设备资料会在下次状态检查时同步给其他电脑。"
-                : "设置已保存，但局域网自动发现不可用；仍可使用 IP 地址手动连接。");
-        }
-        catch (Exception ex)
-        {
-            try { AutoStartManager.SetEnabled(previousAutoStart); } catch { }
-            AutoStartBox.IsChecked = previousAutoStart;
-            ShowError("保存设置失败", ex);
-        }
     }
 
     private void ShowError(string title, Exception ex)

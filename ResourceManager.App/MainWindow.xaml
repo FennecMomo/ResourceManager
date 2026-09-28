@@ -740,7 +740,19 @@
                 </TabItem>
 
                 <TabItem Header="设置">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="28,23,28,22" Width="700" HorizontalAlignment="Left">
+                    <Grid Margin="28,23,28,22">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="14"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border Style="{StaticResource Card}" Padding="16,12" MaxWidth="700" HorizontalAlignment="Left" Width="700">
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="设置" Style="{StaticResource CardHeading}"/>
+                                    <TextBlock x:Name="SettingsSaveHint" Text="设置已保存" Style="{StaticResource Caption}" Margin="0,3,12,0" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <Button x:Name="SaveSettingsButton" Grid.Column="1" Content="保存设置" Click="SaveSettings_Click" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Width="700" HorizontalAlignment="Left">
                         <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
                             <TextBlock Text="你的资料" Style="{StaticResource PageHeading}"/><TextBlock Text="其他设备连接你时，会看到这里的昵称和头像。" Style="{StaticResource Caption}" Margin="0,5,0,22"/>
                             <TextBlock Text="昵称" Style="{StaticResource Caption}" Margin="0,0,0,6"/><TextBox x:Name="NicknameBox" Margin="0,0,0,20"/>
@@ -755,6 +767,19 @@
                             <TextBlock Text="开机启动仅为当前 Windows 用户设置，不需要管理员权限。" Style="{StaticResource Caption}"/>
                         </StackPanel></Border>
                         <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
+                            <TextBlock Text="软件更新" Style="{StaticResource PageHeading}"/><TextBlock Text="每次启动会自动检查一次；仅在发现新版本时提醒，由你决定何时下载和安装。安装前会核对版本、大小和 SHA-256。" Style="{StaticResource Caption}" Margin="0,5,0,22" TextWrapping="Wrap"/>
+                            <StackPanel Orientation="Horizontal"><Button x:Name="CheckUpdateButton" Content="检查更新" Click="CheckUpdate_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/><TextBlock x:Name="UpdateStatusText" Text="当前版本" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/></StackPanel>
+                        </StackPanel></Border>
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
+                            <TextBlock Text="存储位置" Style="{StaticResource PageHeading}"/>
+                            <TextBlock x:Name="StoragePathText" TextWrapping="Wrap" Margin="0,12,0,8"/>
+                            <TextBlock Text="资料、发布副本和内部缓存统一保存在此处。修改位置会重启程序，校验成功后切换，原数据保留。" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,14"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="更改存储位置…" Click="ChangeStorage_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/>
+                                <Button x:Name="OldStorageButton" Content="查看旧目录并清理…" Click="OpenOldStorage_Click" Style="{StaticResource QuietButton}" Visibility="Collapsed"/>
+                            </StackPanel>
+                        </StackPanel></Border>
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
                             <TextBlock Text="当前路由器" Style="{StaticResource PageHeading}"/>
                             <TextBlock Text="外部设备需要填写“路由器外部入口”。请把这个地址提供给路由器外的设备。" Style="{StaticResource Caption}" Margin="0,5,0,18" TextWrapping="Wrap"/>
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="155"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -767,7 +792,7 @@
                             <StackPanel Orientation="Horizontal" Margin="0,18,0,0"><Button x:Name="CopyRouterWanButton" Content="复制外部入口 IP" Click="CopyRouterWan_Click" IsEnabled="False" Margin="0,0,8,0"/><Button x:Name="RemoveRouterMappingButton" Content="删除本机外部映射" Click="RemoveRouterMapping_Click" Style="{StaticResource DangerButton}" IsEnabled="False"/></StackPanel>
                             <Border Height="1" Background="{StaticResource Line}" Margin="0,20,0,18"/>
                             <TextBlock Text="路由器入口" Style="{StaticResource CardHeading}"/>
-                            <TextBlock Text="保存路由器 WAN IPv4 后扫描 48001–48099，发现并连接路由器内的设备。" Style="{StaticResource Caption}" Margin="0,4,0,18" TextWrapping="Wrap"/>
+                            <TextBlock Text="入口单独保存。添加或保存入口后扫描 48001–48099；切页时选择“保存并离开”仅保存入口，稍后可点击刷新发现设备。" Style="{StaticResource Caption}" Margin="0,4,0,18" TextWrapping="Wrap"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel Margin="0,0,12,0"><TextBlock Text="入口名称" Style="{StaticResource Caption}" Margin="0,0,0,5"/><TextBox x:Name="GatewayNameBox" ToolTip="名称，例如办公室华为路由器"/></StackPanel>
@@ -787,23 +812,10 @@
                                 <TextBlock x:Name="GatewayProgressText" Grid.ColumnSpan="2" Text="未添加路由器入口" Visibility="Collapsed"/>
                             </Grid>
                         </StackPanel></Border>
-                        <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
-                            <TextBlock Text="软件更新" Style="{StaticResource PageHeading}"/><TextBlock Text="每次启动会自动检查一次；仅在发现新版本时提醒，由你决定何时下载和安装。安装前会核对版本、大小和 SHA-256。" Style="{StaticResource Caption}" Margin="0,5,0,22" TextWrapping="Wrap"/>
-                            <StackPanel Orientation="Horizontal"><Button x:Name="CheckUpdateButton" Content="检查更新" Click="CheckUpdate_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/><TextBlock x:Name="UpdateStatusText" Text="当前版本" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/></StackPanel>
-                        </StackPanel></Border>
-                        <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
-                            <TextBlock Text="存储位置" Style="{StaticResource PageHeading}"/>
-                            <TextBlock x:Name="StoragePathText" TextWrapping="Wrap" Margin="0,12,0,8"/>
-                            <TextBlock Text="资料、发布副本和内部缓存统一保存在此处。修改位置会重启程序，校验成功后切换，原数据保留。" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,14"/>
-                            <StackPanel Orientation="Horizontal">
-                                <Button Content="更改存储位置…" Click="ChangeStorage_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/>
-                                <Button x:Name="OldStorageButton" Content="查看旧目录并清理…" Click="OpenOldStorage_Click" Style="{StaticResource QuietButton}" Visibility="Collapsed"/>
-                            </StackPanel>
-                        </StackPanel></Border>
-                        <Button Content="保存设置" Click="SaveSettings_Click" HorizontalAlignment="Left" Margin="0,0,0,20"/>
                         <TextBlock Text="设备 ID" Style="{StaticResource Caption}" FontWeight="SemiBold"/><TextBlock x:Name="DeviceIdText" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,5,0,0"/>
                         <TextBlock Text="首次运行如 Windows 防火墙提示，请允许公司网络访问。" Style="{StaticResource Caption}" Margin="0,14,0,0"/>
-                    </StackPanel></ScrollViewer>
+                        </StackPanel></ScrollViewer>
+                    </Grid>
                 </TabItem>
             </TabControl>
 

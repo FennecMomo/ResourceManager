@@ -9,11 +9,7 @@ public partial class MainWindow
 
     private LocalControlResponse HandleLocalControl(LocalControlRequest request)
     {
-        var saved = store.GetSettings();
-        var unsaved = NicknameBox.Text != saved.Profile.Nickname || ListenPortBox.Text != saved.ListenPort.ToString() ||
-            (CloseToTrayBox.IsChecked == true) != saved.CloseToTray ||
-            (AutoStartBox.IsChecked == true) != AutoStartManager.IsEnabled() ||
-            !(pendingAvatar ?? []).SequenceEqual(saved.Profile.Avatar ?? []);
+        var unsaved = HasUnsavedSettings || savingSettings || resolvingSettingsNavigation;
         var state = new
         {
             protocol = 1,
