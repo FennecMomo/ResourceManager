@@ -319,7 +319,9 @@
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="设备"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="我的发布"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE943;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="Git 协作"/></StackPanel></ListBoxItem>
-                    <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F2;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="聊天"/></StackPanel></ListBoxItem>
+                    <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F2;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="聊天"/>
+                        <Border x:Name="ChatUnreadBadge" Background="#E13745" CornerRadius="9" Padding="6,1" Margin="10,0,0,0" Visibility="Collapsed"><TextBlock x:Name="ChatUnreadText" Foreground="White" FontSize="11" FontWeight="SemiBold"/></Border>
+                    </StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE734;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="收藏"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="下载"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE939;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="反馈"/></StackPanel></ListBoxItem>
@@ -566,13 +568,16 @@
                             <Border x:Name="ChatConversationPanel" Style="{StaticResource Card}" Padding="13"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                                 <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <TextBlock x:Name="ChatConversationHeading" Text="会话" Style="{StaticResource CardHeading}" Margin="5,1,0,0" VerticalAlignment="Center"/>
-                                    <Button x:Name="ChatConversationsToggle" Grid.Column="1" Content="‹" Click="ChatConversationsToggle_Click" Style="{StaticResource QuietButton}" Width="32" Height="32" Padding="0" FontSize="22" ToolTip="收起会话栏" AutomationProperties.Name="收起会话栏"/>
+                                    <Grid Grid.Column="1">
+                                        <Button x:Name="ChatConversationsToggle" Content="‹" Click="ChatConversationsToggle_Click" Style="{StaticResource QuietButton}" Width="32" Height="32" Padding="0" FontSize="22" ToolTip="收起会话栏" AutomationProperties.Name="收起会话栏"/>
+                                        <Border x:Name="ChatCollapsedUnreadDot" Width="8" Height="8" CornerRadius="4" Background="#E13745" HorizontalAlignment="Right" VerticalAlignment="Top" IsHitTestVisible="False" Visibility="Collapsed"/>
+                                    </Grid>
                                 </Grid>
                                 <ListBox x:Name="ChatConversationList" Grid.Row="1" ItemsSource="{Binding ChatConversations}" SelectionChanged="ChatConversation_SelectionChanged">
                                     <ListBox.ItemTemplate><DataTemplate><StackPanel>
                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                             <TextBlock Text="{Binding Name}" Style="{StaticResource ItemTitle}"/>
-                                            <Border Grid.Column="1" Background="#EAF2FF" CornerRadius="9" Padding="6,1" Visibility="{Binding UnreadVisibility}"><TextBlock Text="{Binding Unread}" Foreground="#2867D9" FontWeight="SemiBold" FontSize="11"/></Border>
+                                            <Border Grid.Column="1" Background="#E13745" CornerRadius="9" Padding="6,1" Visibility="{Binding UnreadVisibility}"><TextBlock Text="{Binding UnreadText}" Foreground="White" FontWeight="SemiBold" FontSize="11"/></Border>
                                         </Grid>
                                         <TextBlock Text="{Binding Status}" Style="{StaticResource StatusTextStyle}" Margin="0,4,0,0"/>
                                     </StackPanel></DataTemplate></ListBox.ItemTemplate>

@@ -42,6 +42,8 @@
 
 响应字段：`success`、`error`、`data`。状态包括实际 EXE、版本、数据目录、共享服务状态、窗口是否可见、当前页面、未保存设置、私发副本准备状态、活动下载数、公开资源数及设备数。它不返回聊天正文、文件内容、令牌或密钥。
 
+0.4.8 增加 `unreadChatMessages`（总未读数，包含静音会话）和 `chatTrayFlashing`（是否存在触发托盘闪烁的非静音未读）。均为只读汇总，不会改变已读状态或触发提醒。
+
 退出确认先写回管道，再进入应用既有的 `ExitAsync`。`unsaved_settings`、`preparing_private_resource`、`unsupported_command`、`invalid_protocol_or_process`、`invalid_request`、`handler_failed` 都是机器可读失败原因。
 
 ## 验证

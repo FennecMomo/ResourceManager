@@ -55,6 +55,7 @@ public partial class MainWindow
         var label = collapsed ? "展开会话栏" : "收起会话栏";
         ChatConversationsToggle.ToolTip = label;
         System.Windows.Automation.AutomationProperties.SetName(ChatConversationsToggle, label);
+        RefreshChatNotifications();
     }
 
     private void ChatConversationsToggle_Click(object sender, RoutedEventArgs e)
@@ -102,6 +103,7 @@ public partial class MainWindow
         }
         finally { chatRefreshing = false; }
         RefreshChatHeader();
+        RefreshChatNotifications();
     }
 
     private void RefreshChatTimeline()
@@ -111,7 +113,7 @@ public partial class MainWindow
         var peerId = SelectedChatPeerId;
         if (peerId is null) { RefreshChatHeader(); return; }
         foreach (var message in store.GetChatMessages(peerId)) ChatMessages.Add(new ChatMessageRow(message));
-        if (Tabs.SelectedIndex == 3 && IsVisible && WindowState != WindowState.Minimized && IsActive)
+        if (IsChatForeground)
         {
             store.MarkChatRead(peerId);
             RefreshChatConversations();
@@ -330,8 +332,7 @@ public partial class MainWindow
     private void OnChatReceived(ChatMessage message)
     {
         if (exiting) return;
-        var active = Tabs.SelectedIndex == 3 && SelectedChatPeerId == message.PeerId && IsVisible &&
-                     WindowState != WindowState.Minimized && IsActive;
+        var active = IsChatForeground && SelectedChatPeerId == message.PeerId;
         if (active)
         {
             store.MarkChatRead(message.PeerId);
@@ -339,7 +340,11 @@ public partial class MainWindow
         }
         RefreshChatConversations();
         var muted = store.GetChatConversations().FirstOrDefault(item => item.PeerId == message.PeerId)?.MutedUntilUtc > DateTimeOffset.UtcNow;
-        if (!active && !muted) ShowChatToast(message);
+        if (!active && !muted)
+        {
+            if (chatNotificationServices is { } services) services.ShowToast(message);
+            else if (chatDesktopIntegration) ShowChatToast(message);
+        }
     }
 
     private void OnChatChanged(ChatMessage message)
@@ -358,14 +363,9 @@ public partial class MainWindow
         chatToastWindows.Add(toast);
         toast.Loaded += (_, _) => PositionReminderWindows();
         toast.Closed += (_, _) => { chatToastWindows.Remove(toast); PositionReminderWindows(); };
-        toast.OpenRequested += (_, _) =>
+        toast.OpenRequested += async (_, _) =>
         {
-            ShowWindow();
-            Tabs.SelectedIndex = 3;
-            RefreshChatConversations();
-            ChatConversationList.SelectedItem = ChatConversations.FirstOrDefault(item => item.PeerId == message.PeerId);
-            RefreshChatTimeline();
-            toast.Close();
+            if (await OpenChatNotificationAsync(message.PeerId)) toast.Close();
         };
         toast.Show();
     }
@@ -385,6 +385,7 @@ public partial class MainWindow
 public sealed record ChatConversationRow(string PeerId, string Name, string Status, long Unread)
 {
     public Visibility UnreadVisibility => Unread > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public string UnreadText => Unread > 99 ? "99+" : Unread.ToString();
 }
 
 public sealed record ChatMessageRow(ChatMessage Message)

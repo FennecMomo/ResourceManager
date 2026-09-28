@@ -11,6 +11,19 @@ public sealed partial class NodeStore
     public void SaveChatConversationsCollapsed(bool collapsed) =>
         SetSetting("chat_conversations_collapsed", collapsed ? "1" : "0");
 
+    public string? GetLatestUnreadChatPeer()
+    {
+        lock (gate)
+        {
+            using var db = Open();
+            using var command = Cmd(db, """
+                SELECT m.peer_id FROM chat_messages m JOIN chat_conversations c ON c.peer_id=m.peer_id
+                WHERE m.outgoing=0 AND m.seq>c.read_through ORDER BY m.seq DESC LIMIT 1
+                """);
+            return command.ExecuteScalar() as string;
+        }
+    }
+
     public void SavePeerCapabilities(string deviceId, IEnumerable<string>? capabilities)
     {
         var json = JsonSerializer.Serialize((capabilities ?? []).Where(value => value is { Length: > 0 and <= 80 })

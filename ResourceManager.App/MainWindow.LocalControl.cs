@@ -22,6 +22,8 @@ public partial class MainWindow
             windowVisible = IsVisible,
             page = Tabs.SelectedIndex,
             unsavedSettings = unsaved,
+            unreadChatMessages = chatUnreadCount,
+            chatTrayFlashing = chatFlashing,
             preparingPrivateResource = preparingChatResource,
             activeDownloads = activeDownloads.Count,
             publishedResources = store.GetResources().Count,

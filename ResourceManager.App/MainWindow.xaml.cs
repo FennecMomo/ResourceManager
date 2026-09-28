@@ -90,10 +90,13 @@ public partial class MainWindow : Window
 
     public MainWindow(bool startedWithWindows = false) : this(startedWithWindows, null, true) { }
 
-    internal MainWindow(bool startedWithWindows, SettingsEditorServices? services, bool desktopIntegration, Func<Task>? chatPump = null)
+    internal MainWindow(bool startedWithWindows, SettingsEditorServices? services, bool desktopIntegration, Func<Task>? chatPump = null,
+        ChatNotificationServices? notifications = null)
     {
         settingsServices = services;
         chatPumpOverride = chatPump;
+        chatNotificationServices = notifications;
+        chatDesktopIntegration = desktopIntegration;
         this.startedWithWindows = startedWithWindows;
         feedbackSecrets = new FeedbackSecretStore(NodeDefaults.DataDirectory);
         InitializeComponent();
@@ -151,7 +154,7 @@ public partial class MainWindow : Window
         tray.ContextMenuStrip.Items.Add("打开资源管理器", null, (_, _) => Dispatcher.Invoke(ShowWindow));
         tray.ContextMenuStrip.Items.Add("检查更新", null, (_, _) => Dispatcher.Invoke(async () => await CheckForUpdatesAsync(true)));
         tray.ContextMenuStrip.Items.Add("退出并停止共享", null, (_, _) => Dispatcher.Invoke(async () => await ExitAsync()));
-        tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowWindow);
+        tray.MouseClick += (_, e) => { if (e.Button == WinForms.MouseButtons.Left) Dispatcher.Invoke(async () => await OpenUnreadChatAsync()); };
         tray.BalloonTipClicked += (_, _) => Dispatcher.Invoke(ShowWindow);
         timer.Tick += async (_, _) => await TimerTickAsync();
         feedbackDraftTimer.Tick += (_, _) =>
@@ -167,6 +170,7 @@ public partial class MainWindow : Window
         InitializeFeedback();
         RefreshGitProjectList();
         InitializeChatEditor();
+        InitializeChatNotifications();
         RefreshChatConversations();
         UpdatePageHeader();
     }
@@ -1916,6 +1920,7 @@ public partial class MainWindow : Window
     {
         if (exiting) return;
         exiting = true;
+        chatNotificationTimer.Stop();
         if (chatResourcePreparation is not null)
         {
             try { await chatResourcePreparation; }
@@ -1962,6 +1967,7 @@ public partial class MainWindow : Window
             gitCancellation.Dispose();
             tray.Visible = false;
             tray.Dispose();
+            chatUnreadIcon?.Dispose();
             appIcon.Dispose();
             iconStream.Dispose();
             if (stagedUpdate is not null && Environment.ProcessPath is not null)
