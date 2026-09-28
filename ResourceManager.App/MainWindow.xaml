@@ -462,7 +462,14 @@
                         <Border Grid.Column="2" Style="{StaticResource Card}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="14"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBlock Text="文件信息" Style="{StaticResource PageHeading}" VerticalAlignment="Center"/>
-                                <Button x:Name="PublishButton" Grid.Column="1" Content="发布" Click="Publish_Click"/>
+                                <Button x:Name="PublishButton" Grid.Column="1" Content="发布 ▾" Click="Publish_Click">
+                                    <Button.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="发布文件…" Click="PublishFiles_Click"/>
+                                            <MenuItem Header="发布文件夹…" Click="PublishFolders_Click"/>
+                                        </ContextMenu>
+                                    </Button.ContextMenu>
+                                </Button>
                             </Grid>
                             <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
                                 <TextBlock x:Name="LocalDetailName" Text="选择左侧资源或分组" FontSize="19" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,12"/>

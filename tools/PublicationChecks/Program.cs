@@ -80,18 +80,6 @@ internal static class Program
                         $"single publish button remains top-right beside the file tree at {size}");
                     Render(root, size.Item1, size.Item2);
                 }
-                var picker = new PublicationPicker(folder);
-                await picker.NavigateAsync(folder);
-                var entries = (ListBox)typeof(PublicationPicker).GetField("entries", Private)!.GetValue(picker)!;
-                var choices = entries.Items.Cast<PublicationPicker.PickerEntry>().ToArray();
-                Require(choices.Any(c => c.Folder) && choices.Any(c => !c.Folder) && choices.All(c => c.Name != ".git"), "one picker lists both selectable files and folders");
-                foreach (var entry in choices) entries.SelectedItems.Add(entry);
-                Require(entries.SelectedItems.Count == 2, "picker accepts mixed multiple selection");
-                await picker.NavigateAsync(Path.Combine(folder, "子文件夹"));
-                Require(entries.Items.Count == 1 && ((PublicationPicker.PickerEntry)entries.Items[0]).Name == "资料.txt", "picker navigates into a folder");
-                await picker.NavigateAsync(Path.Combine(rootDir, "missing"));
-                Require(!((Button)typeof(PublicationPicker).GetField("current", Private)!.GetValue(picker)!).IsEnabled && entries.Items.Count == 0, "unreadable picker location cannot submit a stale selection");
-                picker.Close();
                 var beforeBatch = store.GetResources().Count;
                 var batch = window.PublishPathsAsync([file, folder, Path.Combine(rootDir, "missing-file")], PublishMode.Reference, sub.Id);
                 var control = await window.HandleLocalControlAsync(new LocalControlRequest(1, "shutdown", Environment.ProcessId), default);

@@ -172,14 +172,34 @@ public partial class MainWindow
         }
     }
 
-    private async void Publish_Click(object sender, RoutedEventArgs e)
+    private void Publish_Click(object sender, RoutedEventArgs e)
     {
-        if (publishing) return;
-        var picker = new PublicationPicker(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)) { Owner = this, Icon = Icon };
-        if (picker.ShowDialog() != true) return;
-        var mode = new PublishModeDialog(picker.SelectedPaths.Count == 1 ? System.IO.Path.GetFileName(picker.SelectedPaths[0]) : $"{picker.SelectedPaths.Count} 个文件或文件夹") { Owner = this, Icon = Icon };
+        if (publishing || exiting) return;
+        PublishButton.ContextMenu.PlacementTarget = PublishButton;
+        PublishButton.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        PublishButton.ContextMenu.IsOpen = true;
+    }
+
+    private async void PublishFiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (publishing || exiting) return;
+        var picker = new Microsoft.Win32.OpenFileDialog { Title = "选择要发布的文件", Multiselect = true, CheckFileExists = true };
+        if (picker.ShowDialog(this) == true) await ConfirmPublicationAsync(picker.FileNames);
+    }
+
+    private async void PublishFolders_Click(object sender, RoutedEventArgs e)
+    {
+        if (publishing || exiting) return;
+        var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择要发布的文件夹", Multiselect = true };
+        if (picker.ShowDialog(this) == true) await ConfirmPublicationAsync(picker.FolderNames);
+    }
+
+    private async Task ConfirmPublicationAsync(IReadOnlyList<string> paths)
+    {
+        if (paths.Count == 0 || publishing || exiting) return;
+        var mode = new PublishModeDialog(paths.Count == 1 ? System.IO.Path.GetFileName(paths[0]) : $"{paths.Count} 个项目") { Owner = this, Icon = Icon };
         if (mode.ShowDialog() != true) return;
-        var failures = await PublishPathsAsync(picker.SelectedPaths, mode.SelectedMode, SelectedPublicationGroup);
+        var failures = await PublishPathsAsync(paths, mode.SelectedMode, SelectedPublicationGroup);
         if (!exiting && failures.Count > 0) System.Windows.MessageBox.Show(this, string.Join("\n", failures), "部分项目发布失败");
     }
 
