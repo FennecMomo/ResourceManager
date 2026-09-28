@@ -26,6 +26,58 @@ public sealed class StorageLocation(string configurationPath)
         ? JsonSerializer.Deserialize<StorageConfiguration>(File.ReadAllText(configurationPath))
             ?? throw new InvalidDataException("存储位置配置为空，请恢复配置后重试。") : null;
 
+    /// <summary>Startup may repair/recreate a profile; migration validation remains strict.</summary>
+    public StorageConfiguration PrepareForStartup(StorageConfiguration configuration, string fallbackRoot,
+        Action<Exception>? reportRecovery = null)
+    {
+        if (configuration.Pending is not null)
+            throw new InvalidOperationException("请先完成迁移，或选择其他目录新建资料。");
+        StorageConfiguration ready;
+        try
+        {
+            ready = InitializeProfile(configuration.Directory);
+        }
+        catch (Exception ex) when (IsRecoverableStartupError(ex))
+        {
+            // Leave the original database and its WAL files together for later recovery.
+            var fresh = Path.Combine(Normalize(fallbackRoot), "recovered-" + Guid.NewGuid().ToString("N"));
+            ready = InitializeProfile(fresh) with { PreviousDirectory = configuration.Directory };
+            reportRecovery?.Invoke(ex);
+        }
+        // Do not label a profile initialized or switch the pointer until both stores are usable.
+        ready = ready with { PreviousDirectory = ready.PreviousDirectory ?? configuration.PreviousDirectory };
+        Save(ready);
+        return ready;
+    }
+
+    public StorageConfiguration? ReadForStartup(Action<Exception>? reportRecovery = null)
+    {
+        try { return Read(); }
+        catch (Exception ex) when (IsRecoverableStartupError(ex))
+        {
+            reportRecovery?.Invoke(ex);
+            return null;
+        }
+    }
+
+    private static bool IsRecoverableStartupError(Exception ex) => ex is
+        IOException or UnauthorizedAccessException or SqliteException or JsonException or ArgumentException or FormatException or OverflowException;
+
+    private StorageConfiguration InitializeProfile(string directory)
+    {
+        directory = Normalize(directory);
+        if (IsWithin(configurationPath, directory))
+            throw new IOException("存储目录不能包含程序的引导配置目录。");
+        ValidateWritable(directory);
+        // CREATE TABLE IF NOT EXISTS and existing schema upgrades preserve usable legacy data.
+        var store = new NodeStore(directory);
+        _ = store.GetSettings();
+        _ = new FeedbackStore(directory);
+        var ready = new StorageConfiguration(directory, true);
+        ValidateCurrent(ready);
+        return ready;
+    }
+
     public void Save(StorageConfiguration configuration)
     {
         if (IsWithin(configurationPath, configuration.Directory))

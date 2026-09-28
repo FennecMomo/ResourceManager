@@ -5,6 +5,139 @@ namespace ResourceManager.Tests;
 
 public sealed class StorageLocationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void StartupCreatesMissingDatabaseDespiteInitializedConfiguration(bool directoryExists)
+    {
+        using var space = new Space();
+        if (directoryExists) Directory.CreateDirectory(space.Source);
+        space.Locations.Save(new StorageConfiguration(space.Source, true));
+        var ready = space.Locations.PrepareForStartup(space.Locations.Read()!, space.Target);
+        Assert.Equal(space.Source, ready.Directory);
+        Assert.True(ready.Initialized);
+        StorageLocation.ValidateCurrent(ready);
+        Assert.Equal(ready, space.Locations.Read());
+        Assert.True(File.Exists(Path.Combine(space.Source, "feedback.db")));
+    }
+
+    [Fact]
+    public void StartupRepairsEmptyDatabaseAndSurvivesSecondLaunch()
+    {
+        using var space = new Space();
+        space.Write("source/resources.db", "");
+        var ready = space.Locations.PrepareForStartup(new StorageConfiguration(space.Source, true), space.Target);
+        var identity = new NodeStore(ready.Directory).GetSettings().Profile.DeviceId;
+        var next = space.Locations.PrepareForStartup(space.Locations.Read()!, space.Target);
+        Assert.Equal(space.Source, next.Directory);
+        Assert.Equal(identity, new NodeStore(next.Directory).GetSettings().Profile.DeviceId);
+    }
+
+    [Fact]
+    public void StartupRecreatesMissingSettingsTableWithoutDiscardingResources()
+    {
+        using var space = new Space();
+        var store = new NodeStore(space.Source);
+        var resource = store.AddResource(space.Write("document.txt", "keep"), PublishMode.Reference);
+        using (var db = new SqliteConnection($"Data Source={Path.Combine(space.Source, "resources.db")};Pooling=False"))
+        {
+            db.Open();
+            using var command = db.CreateCommand();
+            command.CommandText = "DROP TABLE settings";
+            command.ExecuteNonQuery();
+        }
+        var ready = space.Locations.PrepareForStartup(new StorageConfiguration(space.Source, true), space.Target);
+        Assert.Equal(space.Source, ready.Directory);
+        Assert.Equal(resource, new NodeStore(ready.Directory).GetResource(resource.Id));
+        StorageLocation.ValidateCurrent(ready);
+    }
+
+    [Theory]
+    [InlineData("resources.db")]
+    [InlineData("feedback.db")]
+    public void StartupFallsBackFromCorruptDatabaseAndKeepsOriginal(string database)
+    {
+        using var space = new Space();
+        space.Write("source/" + database, "not a database");
+        space.Write("source/library/important.txt", "original payload");
+        Exception? failure = null;
+        var ready = space.Locations.PrepareForStartup(new StorageConfiguration(space.Source, true), space.Target, ex => failure = ex);
+        Assert.IsType<SqliteException>(failure);
+        Assert.True(StorageLocation.IsWithin(ready.Directory, space.Target));
+        Assert.Equal(space.Source, ready.PreviousDirectory);
+        Assert.Equal("not a database", File.ReadAllText(Path.Combine(space.Source, database)));
+        Assert.Equal("original payload", File.ReadAllText(Path.Combine(space.Source, "library", "important.txt")));
+        StorageLocation.ValidateCurrent(ready);
+        Assert.Equal(ready, space.Locations.Read());
+    }
+
+    [Fact]
+    public void StartupRetainsLegacyIdentitySettingsAndRecordsWithoutInitializedFlag()
+    {
+        using var space = new Space();
+        var old = new NodeStore(space.Source);
+        old.SaveSettings("旧版昵称", null, 38642, false);
+        var resource = old.AddResource(space.Write("document.txt", "keep"), PublishMode.Reference);
+        space.Write("bootstrap/storage.json", System.Text.Json.JsonSerializer.Serialize(new { Directory = space.Source }));
+        var ready = space.Locations.PrepareForStartup(space.Locations.ReadForStartup()!, space.Target);
+        var current = new NodeStore(ready.Directory);
+        Assert.Equal(old.GetSettings(), current.GetSettings());
+        Assert.Equal(resource, current.GetResource(resource.Id));
+        Assert.Equal(space.Source, ready.Directory);
+    }
+
+    [Fact]
+    public void StartupCanReplaceBrokenBootstrapAfterInitializingChosenDirectory()
+    {
+        using var space = new Space();
+        space.Write("bootstrap/storage.json", "{incomplete");
+        Assert.Null(space.Locations.ReadForStartup());
+        var ready = space.Locations.PrepareForStartup(new StorageConfiguration(space.Source), space.Target);
+        Assert.Equal(ready, space.Locations.Read());
+        StorageLocation.ValidateCurrent(ready);
+    }
+
+    [Theory]
+    [InlineData("CREATE TABLE settings (unexpected TEXT)")]
+    [InlineData("CREATE TABLE settings (key TEXT PRIMARY KEY,value TEXT NOT NULL); INSERT INTO settings VALUES('port','99999999999999999')")]
+    public void StartupCanContinueWhenExistingSchemaOrSettingsCannotBeRepaired(string sql)
+    {
+        using var space = new Space();
+        Directory.CreateDirectory(space.Source);
+        using (var db = new SqliteConnection($"Data Source={Path.Combine(space.Source, "resources.db")};Pooling=False"))
+        {
+            db.Open();
+            using var command = db.CreateCommand();
+            command.CommandText = sql;
+            command.ExecuteNonQuery();
+        }
+        var ready = space.Locations.PrepareForStartup(new StorageConfiguration(space.Source, true), space.Target);
+        Assert.NotEqual(space.Source, ready.Directory);
+        StorageLocation.ValidateCurrent(ready);
+    }
+
+    [Fact]
+    public void FailedFallbackDoesNotOverwriteBootstrapOrClaimInitializationSucceeded()
+    {
+        using var space = new Space();
+        space.Write("source/resources.db", "broken");
+        space.Write("target", "file blocks fallback directory");
+        var original = new StorageConfiguration(space.Source, true);
+        space.Locations.Save(original);
+        Assert.Throws<IOException>(() => space.Locations.PrepareForStartup(original, space.Target));
+        Assert.Equal(original, space.Locations.Read());
+    }
+
+    [Fact]
+    public void StartupDoesNotSilentlyDiscardPendingMigration()
+    {
+        using var space = new Space();
+        _ = new NodeStore(space.Source);
+        var pending = space.Locations.ScheduleMigration(new StorageConfiguration(space.Source, true), space.Target);
+        Assert.Throws<InvalidOperationException>(() => space.Locations.PrepareForStartup(pending, space.Target));
+        Assert.Equal(pending, space.Locations.Read());
+    }
+
     [Fact]
     public async Task MigrationPreservesIdentityResourcesFeedbackGitAndDownloadDestinations()
     {

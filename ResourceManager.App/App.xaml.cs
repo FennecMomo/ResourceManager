@@ -76,10 +76,12 @@ public partial class App : System.Windows.Application
         {
             try
             {
-                var existing = StorageBootstrap.Locations.Read();
-                if (existing is null || !existing.Initialized || existing.Pending is not null)
-                    throw new IOException("资料尚未初始化或存在待处理迁移；后台启动不会显示设置弹窗。");
-                StorageLocation.ValidateCurrent(existing);
+                var existing = StorageBootstrap.Locations.ReadForStartup(ex => AppLog.Write("后台启动引导配置不可用", ex))
+                    ?? new StorageConfiguration(NodeDefaults.LegacyDataDirectory);
+                if (existing.Pending is not null)
+                    throw new IOException("存在待处理迁移；请正常打开程序完成迁移或选择新建资料。");
+                existing = StorageBootstrap.Locations.PrepareForStartup(existing, StorageBootstrap.RecoveryRoot,
+                    ex => AppLog.Write("后台启动原资料无法使用，已切换新资料目录", ex));
                 NodeDefaults.UseDataDirectory(existing.Directory);
             }
             catch (Exception ex) { AppLog.Write("后台启动资料检查失败", ex); Shutdown(7); return; }

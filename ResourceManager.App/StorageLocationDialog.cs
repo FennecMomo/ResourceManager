@@ -107,6 +107,7 @@ internal sealed class StorageLocationDialog : Window
 internal static class StorageBootstrap
 {
     public static readonly StorageLocation Locations = new(StorageLocation.DefaultConfigurationPath);
+    public static string RecoveryRoot => NodeDefaults.LegacyDataDirectory + ".recovery";
 
     public static async Task<bool> PrepareAsync()
     {
@@ -115,7 +116,7 @@ internal static class StorageBootstrap
             StorageConfiguration? configuration = null;
             try
             {
-                configuration = Locations.Read();
+                configuration = Locations.ReadForStartup(ex => AppLog.Write("引导配置不可用，重新选择资料位置", ex));
                 if (configuration is null)
                 {
                     var legacy = NodeDefaults.LegacyDataDirectory;
@@ -126,15 +127,14 @@ internal static class StorageBootstrap
                     if (dialog.ShowDialog() != true) return false;
                     var chosen = dialog.SelectedPath;
                     if (hasLegacy && !chosen.Equals(legacy, StringComparison.OrdinalIgnoreCase))
-                        configuration = Locations.ScheduleMigration(new StorageConfiguration(legacy, true), chosen);
+                    {
+                        var source = Locations.PrepareForStartup(new StorageConfiguration(legacy), RecoveryRoot,
+                            ex => AppLog.Write("旧资料无法使用，已新建资料", ex));
+                        configuration = Locations.ScheduleMigration(source, chosen);
+                    }
                     else
                     {
-                        if (!chosen.Equals(legacy, StringComparison.OrdinalIgnoreCase) && Directory.Exists(chosen) &&
-                            Directory.EnumerateFileSystemEntries(chosen).Any() && !File.Exists(Path.Combine(chosen, "resources.db")))
-                            throw new IOException("请选择空文件夹，或包含 ResourceManager 原资料的目录。");
-                        StorageLocation.ValidateWritable(chosen);
-                        configuration = new StorageConfiguration(chosen, File.Exists(Path.Combine(chosen, "resources.db")));
-                        Locations.Save(configuration);
+                        configuration = new StorageConfiguration(chosen);
                     }
                 }
                 if (configuration.Pending is not null)
@@ -162,24 +162,27 @@ internal static class StorageBootstrap
                     finally { running = false; progressWindow.Close(); }
                     System.Windows.MessageBox.Show($"存储位置已切换到：\n{configuration.Directory}\n\n原数据保留在：\n{configuration.PreviousDirectory}\n\n确认资料完整后，可在设置中打开旧目录，自行清理不再需要的文件。", "迁移完成");
                 }
-                StorageLocation.ValidateCurrent(configuration);
+                configuration = Locations.PrepareForStartup(configuration, RecoveryRoot,
+                    ex => AppLog.Write("原资料无法使用，已切换新资料目录", ex));
                 NodeDefaults.UseDataDirectory(configuration.Directory);
                 return true;
             }
             catch (Exception ex)
             {
-                var result = System.Windows.MessageBox.Show($"{ex.Message}\n\n尚未启动共享服务。\n“是”：重试；“否”：选择已有数据目录；“取消”：退出。",
+                AppLog.Write("存储准备失败，可选择目录新建或恢复资料", ex);
+                var result = System.Windows.MessageBox.Show($"{ex.Message}\n\n尚未启动共享服务。\n“是”：选择目录新建或使用已有资料；“否”：重试；“取消”：退出。",
                     "存储位置不可用", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
                 if (result == MessageBoxResult.Cancel) return false;
-                if (result == MessageBoxResult.Yes) continue;
+                if (result == MessageBoxResult.No) continue;
                 var dialog = new StorageLocationDialog(configuration?.Directory ?? NodeDefaults.LegacyDataDirectory,
-                    "请选择已有资料所在的目录。恢复时必须包含 resources.db，不会自动创建空资料。");
+                    "可以选择空文件夹新建资料，也可以选择旧目录兼容已有资料。数据库缺失时自动新建；无法使用时保留旧文件并切换到新资料目录。");
                 if (dialog.ShowDialog() != true) return false;
                 try
                 {
-                    var restored = new StorageConfiguration(dialog.SelectedPath, true);
-                    StorageLocation.ValidateCurrent(restored);
-                    Locations.Save(restored);
+                    var restored = Locations.PrepareForStartup(new StorageConfiguration(dialog.SelectedPath), RecoveryRoot,
+                        error => AppLog.Write("所选资料无法使用，已切换新资料目录", error));
+                    NodeDefaults.UseDataDirectory(restored.Directory);
+                    return true;
                 }
                 catch (Exception restoreError) { System.Windows.MessageBox.Show(restoreError.Message, "无法使用所选资料"); }
             }
