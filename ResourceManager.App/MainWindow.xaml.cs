@@ -355,6 +355,8 @@ public partial class MainWindow : Window
         var notes = store.GetPeerNotes();
         foreach (var peer in store.GetPeers())
         {
+            // Keep persisted endpoints/history for automatic reconnection, but drop lost rows from this view.
+            if (peerStatus.GetValueOrDefault(peer.DeviceId) is "离线" or "设备已变更") continue;
             var endpoint = store.GetPeerEndpoints(peer.DeviceId)
                 .FirstOrDefault(item => item.Ip == peer.Ip && item.Port == peer.Port && item.Source != "DeviceChanged");
             var gateway = endpoint?.GatewayId is null
@@ -518,6 +520,7 @@ public partial class MainWindow : Window
                 if (peerStatus.GetValueOrDefault(peer.DeviceId) is not ("设备已变更" or "身份校验失败"))
                     peerStatus[peer.DeviceId] = "离线";
                 peerCatalogs.Remove(peer.DeviceId);
+                peerResourceGroups.Remove(peer.DeviceId);
                 peerCapabilities.Remove(peer.DeviceId);
             }
             RefreshPeersView();

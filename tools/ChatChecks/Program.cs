@@ -9,7 +9,7 @@ using System.Windows.Threading;
 using ResourceManager.App;
 using ResourceManager.Core;
 
-internal static class Program
+internal static partial class Program
 {
     private static readonly string Output = Path.GetFullPath("dist/chat-checks");
     private static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -139,6 +139,7 @@ internal static class Program
                 typeof(MainWindow).GetMethod("RefreshChatHeader", Private)!.Invoke(window, null);
                 window.HandleChatInputKey(Key.Enter, ModifierKeys.None, false);
                 Require(!send.IsEnabled && input.Text == "保留草稿" && store.GetChatMessages("peer").Count == before + 1, "unsupported recipient cannot bypass disabled send");
+                await CheckDeviceRefreshAsync(window, store);
                 Require(!window.IsVisible && !((System.Windows.Forms.NotifyIcon)typeof(MainWindow).GetField("tray", Private)!.GetValue(window)!).Visible,
                     "all checks stayed hidden with no tray icon or desktop input");
                 Console.WriteLine($"PASS: {checks} isolated chat checks; IME events are simulated, no live input method or desktop is operated.");
