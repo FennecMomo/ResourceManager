@@ -59,8 +59,9 @@ app.Use(async (context, next) =>
     if (context.Request.Path.StartsWithSegments("/api/v1/workspace"))
     {
         var limit = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
-        if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = 1024 * 1024;
-        if (context.Request.ContentLength > 1024 * 1024) { context.Response.StatusCode = 413; return; }
+        var max = context.Request.Method == "POST" && context.Request.Path.StartsWithSegments("/api/v1/workspace/relay") && context.Request.Path.Value!.Count(c => c == '/') == 5 ? 9 * 1024 * 1024 : 1024 * 1024;
+        if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = max;
+        if (context.Request.ContentLength > max) { context.Response.StatusCode = 413; return; }
     }
     context.Response.Headers.XContentTypeOptions = "nosniff";
     await next();

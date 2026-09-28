@@ -62,12 +62,15 @@ with tempfile.TemporaryDirectory(prefix='rm-packaged-server-') as directory:
                 raise AssertionError('Isolated server not ready')
             capabilities = json.loads(request(base + '/api/v1/workspace/capabilities')[1])
             assert capabilities['version'] == version and capabilities['protocol'] == 'workspace-v1'
+            assert 'published-resources-v1' in capabilities['features']
             assert request(base + '/admin/api/workspace/members')[0] == 403
             assert request(base + '/admin/api/issues')[0] == 403
             assert request(management + '/admin/api/workspace/members')[0] == 200
             assert request(management + '/admin/api/issues')[0] == 200
             assert json.loads(request(base + '/api/v1/capabilities')[1])['protocol'] == 'feedback-v1'
             assert request(base + '/api/v1/workspace/members')[0] == 401
+            assert request(base + '/api/v1/workspace/catalogs')[0] == 401
+            assert request(base + '/api/v1/workspace/relay/poll')[0] == 401
             assert request(base + '/api/v1/workspace/join', b' ' * (1024 * 1024 + 1))[0] == 413
             print('PASS: packaged server CLI, migration, health, protocols, admin isolation, authentication, request limit')
         finally:

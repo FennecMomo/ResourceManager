@@ -50,6 +50,27 @@ internal static class Program
                 var session = await other.JoinAsync(row.Binding);
                 await Until(() => row.Members.Count == 2);
                 Require(window.Servers.Single(s => s != row).Members.Count == 1, "pushed roster does not leak to second server");
+                var otherBinding = row.Binding with { Cached = await other.WatchAsync(row.Binding, session, "", default) };
+                otherStore.SaveServerBinding(otherBinding);
+                var sharedPath = Path.Combine(rootDir, "server-example.txt"); File.WriteAllText(sharedPath, "Shared through server");
+                var shared = otherStore.AddResource(sharedPath, PublishMode.Reference);
+                otherStore.SetServerPublication(otherBinding.Id, "resource", shared.Id, true);
+                var updatePath = Path.Combine(rootDir, "ResourceManager.exe"); File.Copy(Path.ChangeExtension(typeof(MainWindow).Assembly.Location, ".exe"), updatePath);
+                var update = otherStore.AddResource(updatePath, PublishMode.Reference);
+                otherStore.SetServerPublication(otherBinding.Id, "resource", update.Id, true);
+                await other.PublishAsync(otherBinding, session, await new WorkspacePublisher(otherStore).BuildAsync(otherBinding, default), default);
+                await Until(() => row.Catalogs.Any(c => c.Owner == otherStore.GetSettings().Profile.DeviceId && c.Catalog.Resources.Count == 2));
+                row.SelectedMember = row.Members.Single(m => m.DeviceId == otherStore.GetSettings().Profile.DeviceId);
+                Require(row.SelectedMember.ResourceCount == 2 && row.ResourceTree.Count > 0, "server member resource count and group tree are synchronized");
+                var candidates = await (Task<IReadOnlyList<LocalUpdateCandidate>>)typeof(MainWindow).GetMethod("FindServerUpdatesAsync", Private)!.Invoke(window, [CancellationToken.None])!;
+                Require(candidates.Count == 1 && candidates[0].ServerBindingId == row.Binding.Id && candidates[0].Package.ResourceId == update.Id, "bound server participates in update discovery with source identity");
+                MainWindow.ValidateServerUpdateFile(updatePath, candidates[0].Version);
+                Require(true, "server update validation accepts matching Windows x64 executable");
+                var rejectedVersion = false; try { MainWindow.ValidateServerUpdateFile(updatePath, new Version(999, 0, 0)); } catch (InvalidDataException) { rejectedVersion = true; }
+                Require(rejectedVersion, "server update validation rejects advertised version mismatch");
+                var ownGroup = store.GetResourceGroups().First();
+                var publishDialog = new ServerPublicationDialog(store, "group", ownGroup.Id, ownGroup.Name);
+                Require(publishDialog.Choices.Count() == 2 && !publishDialog.IsVisible, "publication dialog lists both server targets without showing a window"); publishDialog.Close();
                 Control<ListBox>("NavList").SelectedIndex = 8;
                 Control<TabControl>("ServerTabs").SelectedItem = row;
                 var root = (FrameworkElement)window.Content;
@@ -57,6 +78,9 @@ internal static class Program
                 {
                     root.Measure(new Size(size.Item1, size.Item2)); root.Arrange(new Rect(0, 0, size.Item1, size.Item2)); root.UpdateLayout();
                     await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                    var resourceNode = row.ResourceTree.SelectMany(n => n.Children).First(n => n.RemoteRow?.Resource.Id == shared.Id);
+                    resourceNode.IsSelected = true; root.UpdateLayout();
+                    Require(row.CanDownload && row.ResourceDetail.Contains(shared.Name), $"selected server resource exposes details and download action at {size}");
                     var tab = (TabItem)Control<TabControl>("ServerTabs").ItemContainerGenerator.ContainerFromIndex(0);
                     Require(tab.ActualHeight > 10 && tab.ActualWidth > 50, $"server tabs have visible header layout at {size}");
                     var bitmap = new RenderTargetBitmap(size.Item1, size.Item2, 96, 96, PixelFormats.Pbgra32);
@@ -76,6 +100,8 @@ internal static class Program
                 one = await Host.Start(Path.Combine(rootDir, "one"), address);
                 await Until(() => row.Status == "在线");
                 Require(row.Members.Count == 2, "client automatically reconnects to restarted server with original identity");
+                await Until(() => row.Catalogs.Any(c => c.Owner == otherStore.GetSettings().Profile.DeviceId && c.Catalog.Resources.Count == 2));
+                Require(!row.Catalogs.Single(c => c.Owner == otherStore.GetSettings().Profile.DeviceId).Online, "persisted catalog survives restart while offline publisher is not downloadable");
                 var replacement = await client.JoinAsync(row.Binding);
                 await Until(() => row.Status == "连接受限");
                 await Task.Delay(1500);

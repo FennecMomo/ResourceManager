@@ -481,6 +481,7 @@
                                 <TextBlock x:Name="LocalDetailPath" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,12,0,16"/>
                                 <WrapPanel Margin="0,0,0,16">
                                     <Button x:Name="GroupPermissionButton" Content="权限设置" Click="GroupPermission_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" IsEnabled="False"/>
+                                    <Button Content="发布到服务器…" Click="PublishToServer_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
                                     <Button x:Name="RenameGroupButton" Content="重命名" Click="RenameGroup_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" IsEnabled="False"/>
                                     <Button x:Name="MovePublicationButton" Content="移动到…" Click="MovePublication_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" IsEnabled="False"/>
                                     <Button x:Name="DeleteGroupButton" Content="删除分组" Click="DeleteGroup_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" IsEnabled="False"/>
@@ -883,13 +884,19 @@
                                     <Border Style="{StaticResource Card}" Margin="0,12,0,0"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                                         <StackPanel><TextBlock Text="{Binding Name}" Style="{StaticResource CardHeading}"/><TextBlock Text="{Binding Address}" Style="{StaticResource Caption}" Margin="0,5,0,0"/></StackPanel>
                                         <TextBlock Grid.Row="1" Text="{Binding Detail}" TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,10,0,14"/>
-                                        <ListBox Grid.Row="2" ItemsSource="{Binding Members}" BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
-                                            <ListBox.ItemTemplate><DataTemplate><Border BorderBrush="#E3EAF3" BorderThickness="0,0,0,1" Padding="8,12"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="46"/><ColumnDefinition Width="*"/><ColumnDefinition Width="110"/></Grid.ColumnDefinitions>
-                                                <Border Width="34" Height="34" Background="#E8EFFA" CornerRadius="8" VerticalAlignment="Top"><Grid><TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" Foreground="#5576A6" VerticalAlignment="Center" HorizontalAlignment="Center"/><Image Source="{Binding Avatar}" Stretch="UniformToFill"/></Grid></Border>
-                                                <StackPanel Grid.Column="1"><TextBlock Text="{Binding Nickname}" FontWeight="SemiBold"/><TextBlock Text="{Binding DeviceId, StringFormat=ID：{0}}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,5,0,0"/><TextBlock Text="{Binding Version, StringFormat=客户端：{0}}" Style="{StaticResource Caption}" Margin="0,4,0,0"/></StackPanel>
-                                                <StackPanel Grid.Column="2" HorizontalAlignment="Right"><TextBlock Text="{Binding State}" HorizontalAlignment="Right"/><TextBlock Text="{Binding LastSeen}" FontSize="10" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel>
-                                            </Grid></Border></DataTemplate></ListBox.ItemTemplate>
-                                        </ListBox>
+                                        <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                            <ListBox ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember, Mode=TwoWay}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                                <ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4,8"><Border Width="30" Height="30" Background="#E8EFFA" CornerRadius="7" HorizontalAlignment="Left" Margin="0,0,0,6"><Grid><TextBlock Text="&#xE77B;" FontFamily="Segoe MDL2 Assets" Foreground="#5576A6" VerticalAlignment="Center" HorizontalAlignment="Center"/><Image Source="{Binding Avatar}" Stretch="UniformToFill"/></Grid></Border><TextBlock Text="{Binding Nickname}" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="{Binding State}" Style="{StaticResource Caption}" Margin="0,4,0,0"/><TextBlock Text="{Binding ResourceCount, StringFormat=可见资源：{0}}" Style="{StaticResource Caption}" Margin="0,4,0,0"/><TextBlock Text="{Binding Version, StringFormat=客户端：{0}}" Style="{StaticResource Caption}" Margin="0,4,0,0"/></StackPanel></DataTemplate></ListBox.ItemTemplate>
+                                            </ListBox>
+                                            <Grid Grid.Column="2"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                                <TreeView ItemsSource="{Binding ResourceTree}" SelectedItemChanged="ServerResource_Selected">
+                                                    <TreeView.ItemContainerStyle><Style TargetType="TreeViewItem"><Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/><Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/></Style></TreeView.ItemContainerStyle>
+                                                    <TreeView.ItemTemplate><HierarchicalDataTemplate ItemsSource="{Binding Children}"><StackPanel Orientation="Horizontal"><Path Data="{Binding IconGeometry}" Fill="{Binding IconFill}" Stroke="{Binding IconStroke}" Width="16" Height="16" Stretch="Uniform" Margin="0,0,8,0"/><TextBlock Text="{Binding Name}" TextWrapping="Wrap"/></StackPanel></HierarchicalDataTemplate></TreeView.ItemTemplate>
+                                                </TreeView>
+                                                <TextBlock Grid.Row="1" Text="{Binding ResourceDetail}" TextWrapping="Wrap" Margin="0,12,0,12"/>
+                                                <Button Grid.Row="2" Content="下载选中资源" Click="ServerDownload_Click" IsEnabled="{Binding CanDownload}" HorizontalAlignment="Right"/>
+                                            </Grid>
+                                        </Grid>
                                     </Grid></Border>
                                 </DataTemplate></TabControl.ContentTemplate>
                             </TabControl>

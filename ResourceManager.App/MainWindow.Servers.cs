@@ -40,8 +40,10 @@ public partial class MainWindow
                     var currentProfile = JsonSerializer.Serialize(store.GetSettings().Profile, WorkspaceProtocol.Json);
                     if (row.Session is null || currentProfile != profile)
                     {
+                        await StopPublicationAsync(row);
                         row.Update("连接中", null);
                         row.Session = await workspaceClient!.JoinAsync(row.Binding, token); profile = currentProfile; cursor = "";
+                        row.SupportsResources = (await workspaceClient.InspectAsync(row.Address, token)).Features?.Contains("published-resources-v1") == true;
                     }
                     var snapshot = await workspaceClient!.WatchAsync(row.Binding, row.Session, cursor, token);
                     token.ThrowIfCancellationRequested();
@@ -49,20 +51,39 @@ public partial class MainWindow
                     cursor = snapshot.Cursor; retry = 1;
                     row.Update("在线", null, snapshot);
                     if (save) SaveServerState(row);
+                    if (row.SupportsResources)
+                    {
+                        row.SetCatalogs(await workspaceClient!.CatalogsAsync(row.Binding, row.Session, token));
+                        if (row.PublicationWorker is null)
+                        {
+                            row.PublicationCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+                            row.PublicationWorker = new WorkspacePublisher(store).RunAsync(workspaceClient!, row.Binding, row.Session,
+                                error => Dispatcher.BeginInvoke(() => { row.SyncError = error; row.Notify(); }), row.PublicationCancellation.Token);
+                        }
+                    }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
                 catch (WorkspaceException ex) when (ex.StopRetry)
                 {
+                    await StopPublicationAsync(row);
                     row.Session = null; row.Update("连接受限", ex.Message); SaveServerState(row); break;
                 }
                 catch (Exception ex)
                 {
+                    await StopPublicationAsync(row);
                     row.Session = null; cursor = ""; row.Update("离线 · 自动重连", ex.Message); SaveServerState(row);
                     await Task.Delay(TimeSpan.FromSeconds(retry), token); retry = Math.Min(retry * 2, 30);
                 }
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        finally { await StopPublicationAsync(row); }
+    }
+    private static async Task StopPublicationAsync(ServerTabRow row)
+    {
+        row.PublicationCancellation?.Cancel();
+        if (row.PublicationWorker is not null) await row.PublicationWorker;
+        row.PublicationCancellation?.Dispose(); row.PublicationCancellation = null; row.PublicationWorker = null;
     }
     private void SaveServerState(ServerTabRow row)
     {
@@ -133,7 +154,33 @@ public partial class MainWindow
         public string Address => Binding.Address;
         public string Status => Binding.Status;
         public string Header => Name + " · " + Status;
-        public string Detail => Binding.Error ?? (Status == "在线" ? $"{Members.Count(m => m.State == "在线")} 台设备在线 · {Members.Count} 台已登记" : "保留上次名单，等待服务器连接。");
+        public string Detail => Binding.Error ?? SyncError ?? (Status == "在线" ? $"{Members.Count(m => m.State == "在线")} 台设备在线 · {Members.Count} 台已登记" + (SupportsResources ? "" : " · 资源功能需要服务端 0.2.0") : "保留上次名单，等待服务器连接。");
+        internal bool SupportsResources;
+        internal string? SyncError;
+        internal CancellationTokenSource? PublicationCancellation;
+        internal Task? PublicationWorker;
+        internal WorkspaceOwnerCatalog[] Catalogs = [];
+        public ObservableCollection<ResourceTreeNode> ResourceTree { get; } = [];
+        private ServerMemberRow? selectedMember;
+        public ServerMemberRow? SelectedMember { get => selectedMember; set { selectedMember = value; RebuildResources(); Notify(); } }
+        internal ResourceTreeNode? SelectedResource;
+        public bool CanDownload => Status == "在线" && SelectedMember?.State == "在线" && SelectedResource?.RemoteRow?.Status == "可下载";
+        public string ResourceDetail => SelectedResource?.RemoteRow is { } row ? $"{row.Name}\n{row.Kind} · {row.Size} · {row.Status}\n{row.Note}" : "选择左侧设备，再选择资源查看详情。";
+        internal void SetCatalogs(WorkspaceOwnerCatalog[] catalogs) { Catalogs = catalogs; Update(Status, Binding.Error); }
+        private void RebuildResources()
+        {
+            var selected = SelectedResource?.Key; ResourceTree.Clear(); SelectedResource = null;
+            var data = Catalogs.FirstOrDefault(c => c.Owner == selectedMember?.DeviceId);
+            if (data is null) return;
+            var groups = BuildGroupTree(data.Catalog.Groups, ResourceTree, false);
+            foreach (var item in data.Catalog.Resources)
+            {
+                var row = new ResourceRow(item, item.Name, KindText(item.Kind), ModeText(item.Mode), SizeText(item.Size), Status != "在线" ? "服务器离线" : !data.Online ? "发布者离线" : item.Available ? "可下载" : "原文件不可用", item.Note);
+                var node = new ResourceTreeNode { Key = item.Id, Name = item.Name, GroupId = item.GroupId, RemoteRow = row, IsFolder = item.Kind == ResourceKind.Folder, IsSelected = selected == item.Id };
+                if (groups.TryGetValue(item.GroupId, out var parent)) parent.Children.Add(node); else ResourceTree.Add(node);
+                if (node.IsSelected) SelectedResource = node;
+            }
+        }
         public ObservableCollection<ServerMemberRow> Members { get; } = [];
         internal CancellationTokenSource? Cancellation;
         internal Task? Worker;
@@ -142,14 +189,16 @@ public partial class MainWindow
         internal void Update(string status, string? error, WorkspaceSnapshot? snapshot = null)
         {
             Binding = Binding with { Status = status, Error = error, Cached = snapshot ?? Binding.Cached };
+            var selected = selectedMember?.DeviceId;
             Members.Clear();
             foreach (var member in (Binding.Cached?.Members ?? []).OrderByDescending(m => m.Online).ThenBy(m => m.Profile.Nickname))
-                Members.Add(new(member.Profile.DeviceId, member.Profile.Nickname, member.Profile.Version, status == "在线" ? member.Online ? "在线" : "离线" : "缓存 · 待核对", member.LastSeenUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss"), AvatarImage(member.Profile.Avatar)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+                Members.Add(new(member.Profile.DeviceId, member.Profile.Nickname, member.Profile.Version, status == "在线" ? member.Online ? "在线" : "离线" : "缓存 · 待核对", member.LastSeenUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss"), AvatarImage(member.Profile.Avatar), Catalogs.FirstOrDefault(c => c.Owner == member.Profile.DeviceId)?.Catalog.Resources.Count ?? 0));
+            selectedMember = Members.FirstOrDefault(m => m.DeviceId == selected) ?? Members.FirstOrDefault(); RebuildResources(); Notify();
         }
+        internal void Notify() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
         public event PropertyChangedEventHandler? PropertyChanged;
     }
-    public sealed record ServerMemberRow(string DeviceId, string Nickname, string Version, string State, string LastSeen, ImageSource? Avatar);
+    public sealed record ServerMemberRow(string DeviceId, string Nickname, string Version, string State, string LastSeen, ImageSource? Avatar, int ResourceCount = 0);
 }
 
 internal sealed class ServerAddressDialog : Window

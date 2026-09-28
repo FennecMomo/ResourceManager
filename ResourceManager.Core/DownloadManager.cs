@@ -2,7 +2,7 @@ using System.Net;
 
 namespace ResourceManager.Core;
 
-public sealed class DownloadManager(NodeStore store, PeerClient client)
+public sealed class DownloadManager(NodeStore store, IResourceClient client, Func<DownloadJob, PeerInfo?>? resolvePeer = null)
 {
     public DownloadJob CreateJob(PeerInfo peer, RemoteResource resource, string destinationDirectory)
     {
@@ -25,9 +25,9 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
     public async Task<DownloadJob> RunAsync(string jobId, IProgress<DownloadJob>? progress = null, CancellationToken cancellationToken = default)
     {
         var job = store.GetDownload(jobId) ?? throw new ArgumentException("下载任务不存在。", nameof(jobId));
-        var peer = store.GetPeer(job.PeerId) ?? throw new InvalidOperationException("发布者已从设备列表删除。");
         try
         {
+            var peer = resolvePeer?.Invoke(job) ?? store.GetPeer(job.PeerId) ?? throw new InvalidOperationException("发布者已从设备列表删除。");
             var resource = await client.GetResourceAsync(peer, job.ResourceId, cancellationToken).ConfigureAwait(false)
                 ?? throw new FileNotFoundException("发布者已撤销资源。");
             if (!resource.Available || resource.Kind != job.Kind) throw new IOException("资源已不可用或类型已变化。");
@@ -110,23 +110,33 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
     private async Task DownloadFileAsync(PeerInfo peer, string resourceId, RemoteFile file, string target,
         Action<long> report, CancellationToken cancellationToken)
     {
+        var metadata = await client.GetFileMetadataAsync(peer, resourceId, file.RelativePath, cancellationToken).ConfigureAwait(false);
+        if (metadata is not null && metadata.Size != file.Size) throw new IOException("文件已变化，请重新下载。");
+        async Task<bool> Verified(string path)
+        {
+            if (metadata is null) return true;
+            await using var stream = File.OpenRead(path);
+            var hash = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false));
+            return string.Equals(hash, metadata.Sha256, StringComparison.OrdinalIgnoreCase);
+        }
         if (File.Exists(target))
         {
             var existing = new FileInfo(target);
             if (existing.Length == file.Size && Math.Abs((existing.LastWriteTimeUtc - file.ModifiedUtc.UtcDateTime).TotalSeconds) < 2)
-            { report(file.Size); return; }
+            { if (await Verified(target).ConfigureAwait(false)) { report(file.Size); return; } }
         }
         var partial = target + ".rm-part";
         var tagPath = target + ".rm-etag";
         var offset = File.Exists(partial) ? new FileInfo(partial).Length : 0;
         var tag = File.Exists(tagPath) ? await File.ReadAllTextAsync(tagPath, cancellationToken).ConfigureAwait(false) : null;
-        if (offset > file.Size || (offset > 0 && string.IsNullOrEmpty(tag)))
+        if (offset > file.Size || (offset > 0 && (string.IsNullOrEmpty(tag) || metadata is not null && tag != metadata.Etag)))
         {
             File.Delete(partial);
             offset = 0;
         }
         if (offset == file.Size && offset > 0)
         {
+            if (!await Verified(partial).ConfigureAwait(false)) { File.Delete(partial); File.Delete(tagPath); throw new IOException("续传文件校验失败，请重试。"); }
             File.Move(partial, target, true);
             File.SetLastWriteTimeUtc(target, file.ModifiedUtc.UtcDateTime);
             File.Delete(tagPath);
@@ -164,6 +174,7 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
             await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             if (copied != file.Size) throw new IOException("下载大小与远端目录不一致，可重试。");
         }
+        if (!await Verified(partial).ConfigureAwait(false)) { File.Delete(partial); File.Delete(tagPath); throw new IOException("文件 SHA-256 校验失败，未保存损坏文件。"); }
         File.Move(partial, target, true);
         File.SetLastWriteTimeUtc(target, file.ModifiedUtc.UtcDateTime);
         File.Delete(tagPath);

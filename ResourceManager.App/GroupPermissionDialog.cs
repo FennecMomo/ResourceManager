@@ -35,6 +35,11 @@ internal sealed class GroupPermissionDialog : Window
             var box = new CheckBox { Content = new TextBlock { Text = $"{(string.IsNullOrWhiteSpace(note) ? peer.Nickname : note + " · " + peer.Nickname)}\nID：{peer.DeviceId}\n最近地址：{peer.Ip}:{peer.Port}", TextWrapping = TextWrapping.Wrap }, IsChecked = permission.DeviceIds.Contains(peer.DeviceId), Margin = new Thickness(0, 0, 0, 14) };
             devices.Add((peer.DeviceId, box)); list.Children.Add(box);
         }
+        foreach (var member in store.GetWorkspaceDevices().Where(m => m.Profile.DeviceId != store.GetSettings().Profile.DeviceId && devices.All(d => d.Id != m.Profile.DeviceId)))
+        {
+            var box = new CheckBox { Content = new TextBlock { Text = $"{member.Profile.Nickname} · 服务器设备\nID：{member.Profile.DeviceId}", TextWrapping = TextWrapping.Wrap }, IsChecked = permission.DeviceIds.Contains(member.Profile.DeviceId), Margin = new Thickness(0, 0, 0, 14) };
+            devices.Add((member.Profile.DeviceId, box)); list.Children.Add(box);
+        }
         if (devices.Count == 0) list.Children.Add(new TextBlock { Text = "暂无已连接设备。空白名单不允许任何远端设备访问。", TextWrapping = TextWrapping.Wrap });
         list.IsEnabled = Access == GroupAccess.AllowList;
         modes.SelectionChanged += (_, _) => list.IsEnabled = Access == GroupAccess.AllowList;

@@ -28,6 +28,8 @@ public sealed partial class NodeStore
         command.CommandText = """
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS server_bindings(id TEXT PRIMARY KEY,json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS server_publications(server TEXT NOT NULL,kind TEXT NOT NULL,id TEXT NOT NULL,enabled INTEGER NOT NULL,PRIMARY KEY(server,kind,id));
+            CREATE TABLE IF NOT EXISTS server_downloads(job TEXT PRIMARY KEY,server TEXT NOT NULL,owner_name TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS peers (device_id TEXT PRIMARY KEY, ip TEXT NOT NULL, port INTEGER NOT NULL, nickname TEXT NOT NULL, avatar BLOB, last_seen TEXT);
             CREATE TABLE IF NOT EXISTS peer_notes (device_id TEXT PRIMARY KEY, note TEXT NOT NULL);

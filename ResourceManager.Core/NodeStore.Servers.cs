@@ -25,6 +25,6 @@ public sealed partial class NodeStore
     }
     public void RemoveServerBinding(string id)
     {
-        lock (gate) { using var db = Open(); using var cmd = Cmd(db, "DELETE FROM server_bindings WHERE id=$id", "$id", id); cmd.ExecuteNonQuery(); }
+        lock (gate) { using var db = Open(); using var cmd = Cmd(db, "DELETE FROM server_bindings WHERE id=$id; DELETE FROM server_publications WHERE server=$id", "$id", id); cmd.ExecuteNonQuery(); }
     }
 }

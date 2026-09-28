@@ -7,7 +7,7 @@ using ResourceManager.Core;
 
 namespace ResourceManager.Server;
 
-public sealed class WorkspaceHub : BackgroundService
+public sealed partial class WorkspaceHub : BackgroundService
 {
     private readonly object gate = new();
     private readonly string connectionString;
@@ -27,13 +27,14 @@ public sealed class WorkspaceHub : BackgroundService
             CREATE TABLE IF NOT EXISTS members(id TEXT PRIMARY KEY,public_key TEXT NOT NULL,profile TEXT NOT NULL,token_hash TEXT NOT NULL,expires INTEGER NOT NULL,seen INTEGER NOT NULL,online INTEGER NOT NULL,blocked INTEGER NOT NULL DEFAULT 0);
             CREATE UNIQUE INDEX IF NOT EXISTS member_tokens ON members(token_hash) WHERE token_hash!='';
             CREATE TABLE IF NOT EXISTS nonces(value TEXT PRIMARY KEY,time INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS catalogs(owner TEXT PRIMARY KEY,json TEXT NOT NULL);
             UPDATE members SET online=0;
             """; cmd.ExecuteNonQuery();
         var key = store.GetSetting("workspace_signing_key");
         signingKey = key is null ? WorkspaceProtocol.CreateKey() : Convert.FromBase64String(key);
         if (key is null) store.SetSetting("workspace_signing_key", Convert.ToBase64String(signingKey));
     }
-    public WorkspaceCapabilities Capabilities => new(WorkspaceProtocol.Protocol, store.ServerId, store.ServerName, options.Version, WorkspaceProtocol.PublicKey(signingKey));
+    public WorkspaceCapabilities Capabilities => new(WorkspaceProtocol.Protocol, store.ServerId, store.ServerName, options.Version, WorkspaceProtocol.PublicKey(signingKey), ["published-resources-v1"]);
     private SqliteConnection Open() { var db = new SqliteConnection(connectionString); db.Open(); return db; }
     private static SqliteCommand Command(SqliteConnection db, string sql, params object[] args)
     {
@@ -111,8 +112,8 @@ public sealed class WorkspaceHub : BackgroundService
     {
         lock (gate)
         {
-            using var db = Open(); using var cmd = Command(db, "SELECT profile,online,seen FROM members WHERE blocked=0 ORDER BY id"); using var reader = cmd.ExecuteReader(); var list = new List<WorkspaceMember>();
-            while (reader.Read()) list.Add(new(JsonSerializer.Deserialize<WorkspaceProfile>(reader.GetString(0), WorkspaceProtocol.Json)!, reader.GetInt32(1) != 0, DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2))));
+            using var db = Open(); using var cmd = Command(db, "SELECT profile,online,seen,public_key FROM members WHERE blocked=0 ORDER BY id"); using var reader = cmd.ExecuteReader(); var list = new List<WorkspaceMember>();
+            while (reader.Read()) list.Add(new(JsonSerializer.Deserialize<WorkspaceProfile>(reader.GetString(0), WorkspaceProtocol.Json)!, reader.GetInt32(1) != 0, DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2)), reader.GetString(3)));
             return new(cursor, list);
         }
     }
@@ -142,10 +143,11 @@ public sealed class WorkspaceHub : BackgroundService
     }
 }
 
-public static class WorkspaceEndpoints
+public static partial class WorkspaceEndpoints
 {
     public static void MapWorkspace(this WebApplication app)
     {
+        app.MapWorkspaceResources();
         app.MapGet("/api/v1/workspace/capabilities", (WorkspaceHub hub) => Results.Ok(hub.Capabilities));
         app.MapPost("/api/v1/workspace/join", (WorkspaceRegistration request, HttpContext context, WorkspaceHub hub) =>
             Execute(() => Results.Ok(hub.Join(request, context.Connection.RemoteIpAddress?.ToString() ?? "unknown"))));

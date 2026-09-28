@@ -81,6 +81,8 @@ jobs:
         run: |
           Copy-Item ResourceManager.Server/README.md dist/server/README.md
           Copy-Item ResourceManager.Server/README.md dist/server-linux/README.md
+          Copy-Item docs/server-deployment.md dist/server/DEPLOYMENT.md
+          Copy-Item docs/server-deployment.md dist/server-linux/DEPLOYMENT.md
           Copy-Item deploy/server dist/server/deploy -Recurse
           Copy-Item deploy/server dist/server-linux/deploy -Recurse
           Compress-Archive -Path dist/server/* -DestinationPath dist/ResourceManager.Server-win-x64.zip

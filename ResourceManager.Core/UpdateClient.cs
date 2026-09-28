@@ -86,7 +86,7 @@ public sealed class UpdateClient : IDisposable
             }, progress, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<string> DownloadAsync(SharedUpdatePackage update, PeerInfo peer, PeerClient peerClient,
+    public async Task<string> DownloadAsync(SharedUpdatePackage update, PeerInfo peer, IResourceClient peerClient,
         IProgress<long>? progress = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(update.ResourceId) || update.ResourceId.Length > 100)

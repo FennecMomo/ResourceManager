@@ -6,11 +6,11 @@ using System.Text.Json;
 
 namespace ResourceManager.Core;
 
-public sealed record WorkspaceCapabilities(string Protocol, string ServerId, string Name, string Version, string PublicKey);
+public sealed record WorkspaceCapabilities(string Protocol, string ServerId, string Name, string Version, string PublicKey, string[]? Features = null);
 public sealed record WorkspaceProfile(string DeviceId, string Nickname, byte[]? Avatar, string Version);
 public sealed record WorkspaceRegistration(WorkspaceProfile Profile, string PublicKey, long Timestamp, string Nonce, string Signature);
 public sealed record WorkspaceSession(string ServerId, string Token, DateTimeOffset ExpiresUtc, string Nonce, string Signature);
-public sealed record WorkspaceMember(WorkspaceProfile Profile, bool Online, DateTimeOffset LastSeenUtc);
+public sealed record WorkspaceMember(WorkspaceProfile Profile, bool Online, DateTimeOffset LastSeenUtc, string? PublicKey = null);
 public sealed record WorkspaceSnapshot(string Cursor, IReadOnlyList<WorkspaceMember> Members);
 public sealed record ServerBinding(string Id, string Name, string Address, string ServerId, string PublicKey, string Status, string? Error, WorkspaceSnapshot? Cached);
 
@@ -41,9 +41,10 @@ public sealed class WorkspaceException(string message, HttpStatusCode code) : Ex
     public bool StopRetry => Code is HttpStatusCode.Forbidden or HttpStatusCode.Conflict;
 }
 
-public sealed class WorkspaceClient(NodeStore store, string version) : IDisposable
+public sealed partial class WorkspaceClient(NodeStore store, string version) : IDisposable
 {
     private readonly HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(35), MaxResponseContentBufferSize = 64 * 1024 * 1024 };
+    private readonly HttpClient resourceHttp = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromMinutes(6), MaxResponseContentBufferSize = 16 * 1024 * 1024 };
     private static Uri Route(string address, string route) => new(WorkspaceProtocol.NormalizeAddress(address) + "/api/v1/workspace/" + route);
 
     public async Task<WorkspaceCapabilities> InspectAsync(string address, CancellationToken token = default)
@@ -103,5 +104,5 @@ public sealed class WorkspaceClient(NodeStore store, string version) : IDisposab
         await Task.CompletedTask;
         throw new WorkspaceException(message, response.StatusCode);
     }
-    public void Dispose() => http.Dispose();
+    public void Dispose() { http.Dispose(); resourceHttp.Dispose(); }
 }

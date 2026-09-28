@@ -448,7 +448,7 @@ public partial class MainWindow : Window
         Downloads.Clear();
         foreach (var item in store.GetDownloads())
         {
-            var name = store.GetPeer(item.PeerId)?.Nickname ?? "未知设备";
+            var name = DownloadSourceName(item);
             var note = peerCatalogs.GetValueOrDefault(item.PeerId)?.FirstOrDefault(r => r.Id == item.ResourceId)?.Note ?? "";
             Downloads.Add(new DownloadRow(item, item.ResourceName, name, item.Status,
                 $"{SizeText(item.DownloadedBytes)} / {SizeText(item.TotalBytes)}", item.TargetPath, item.Error ?? "", note));
@@ -1050,9 +1050,7 @@ public partial class MainWindow : Window
         try
         {
             var progress = new Progress<DownloadJob>(UpdateDownloadProgressSafely);
-            await Task.Run(
-                () => downloader.RunAsync(id, progress, cancellationToken),
-                cancellationToken);
+            await RunResourceDownloadAsync(id, progress, cancellationToken);
             if (!exiting && !removingDownloads.Contains(id)) SetStatus("下载完成。本地文件在发布者离线时仍可使用。");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1062,6 +1060,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             AppLog.Write("资源下载失败", ex);
+            if (store.GetDownload(id) is { } failed) store.SaveDownload(failed with { Status = "已中断", Error = ex.Message });
             if (!exiting) SetStatus($"下载中断：{ex.Message}。可在下载页继续。");
         }
         finally
@@ -1083,7 +1082,7 @@ public partial class MainWindow : Window
             var index = Downloads.ToList().FindIndex(row => row.Job.Id == job.Id);
             var peerName = index >= 0
                 ? Downloads[index].PeerName
-                : store.GetPeer(job.PeerId)?.Nickname ?? "未知设备";
+                : DownloadSourceName(job);
             var note = peerCatalogs.GetValueOrDefault(job.PeerId)?.FirstOrDefault(r => r.Id == job.ResourceId)?.Note ?? "";
             var row = new DownloadRow(job, job.ResourceName, peerName, job.Status,
                 $"{SizeText(job.DownloadedBytes)} / {SizeText(job.TotalBytes)}", job.TargetPath, job.Error ?? "", note);
@@ -1206,24 +1205,25 @@ public partial class MainWindow : Window
             CheckUpdateButton.IsEnabled = true;
             return;
         }
-        UpdateStatusText.Text = "正在检查 GitHub 和已连接设备上的最新版本…";
+        UpdateStatusText.Text = "正在检查 GitHub、局域网设备和已绑定服务器上的最新版本…";
         try
         {
             var localTask = FindLocalUpdatesAsync(updateCancellation.Token);
+            var serverTask = FindServerUpdatesAsync(updateCancellation.Token);
             AppUpdate? github = null;
             Exception? githubError = null;
             try { github = await updateClient.GetLatestAsync(updateCancellation.Token); }
             catch (OperationCanceledException) when (exiting) { throw; }
             catch (Exception ex) { githubError = ex; }
-            var localUpdates = await localTask;
+            var localUpdates = (await localTask).Concat(await serverTask).GroupBy(c => (c.Version, Hash: c.Package.Sha256.ToUpperInvariant())).Select(g => g.First()).OrderByDescending(c => c.Version).ToArray();
             var local = localUpdates.FirstOrDefault();
             if (github is null && local is null)
             {
                 if (githubError is not null) throw new InvalidOperationException(
-                    "GitHub 检查失败，已连接设备也没有可用的本地更新源。", githubError);
+                    "GitHub 检查失败，设备和已绑定服务器也没有可用更新源。", githubError);
                 UpdateStatusText.Text = "尚未发布可供更新的版本。";
                 SetSidebarUpdateState(UpdateIndicatorState.Latest);
-                if (manual) SetStatus("GitHub 和已连接设备均未发布安装包。");
+                if (manual) SetStatus("已完成检查的来源均未发布安装包。");
                 return;
             }
             var current = UpdateClient.ParseVersion(AppVersion);
@@ -1252,7 +1252,7 @@ public partial class MainWindow : Window
                 (github?.Version != latestVersion ||
                  string.Equals(item.Package.Sha256, github.Sha256, StringComparison.OrdinalIgnoreCase)));
             var githubSource = github?.Version == latestVersion ? github : null;
-            var sourceName = localSource is null ? "GitHub" : $"“{localSource.Peer.Nickname}”的本地源";
+            var sourceName = localSource?.SourceName ?? "GitHub";
             if (localSource is not null && githubSource is null)
             {
                 var acceptUnconfirmedLocal = manual && System.Windows.MessageBox.Show(
@@ -1264,7 +1264,7 @@ public partial class MainWindow : Window
                     githubSource = github;
                     localSource = localUpdates.FirstOrDefault(item => item.Version == github.Version &&
                         string.Equals(item.Package.Sha256, github.Sha256, StringComparison.OrdinalIgnoreCase));
-                    sourceName = localSource is null ? "GitHub" : $"“{localSource.Peer.Nickname}”的本地源";
+                    sourceName = localSource?.SourceName ?? "GitHub";
                 }
                 else if (!acceptUnconfirmedLocal)
                 {
@@ -1285,8 +1285,7 @@ public partial class MainWindow : Window
             {
                 try
                 {
-                    package = await updateClient.DownloadAsync(localSource.Package, localSource.Peer, client,
-                        progress, updateCancellation.Token);
+                    package = await DownloadUpdateCandidateAsync(localSource, progress, updateCancellation.Token);
                     packageHash = localSource.Package.Sha256;
                 }
                 catch (Exception ex) when (githubSource is not null && ex is not OperationCanceledException)
@@ -1324,6 +1323,15 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (updateServerFailures.Length > 0)
+            {
+                UpdateStatusText.Text += "\n部分服务器未完成检查：" + string.Join("；", updateServerFailures);
+                if (stagedUpdate is null && SidebarUpdateTitleText.Text == "已是最新版本")
+                {
+                    UpdateStatusText.Text = $"已完成检查的来源未发现高于 v{AppVersion} 的版本。\n部分服务器未完成检查：" + string.Join("；", updateServerFailures);
+                    SetSidebarUpdateState(UpdateIndicatorState.Failed); SidebarUpdateTitleText.Text = "部分来源未检查";
+                }
+            }
             checkingUpdate = false;
             CheckUpdateButton.IsEnabled = true;
         }
@@ -1895,6 +1903,8 @@ public partial class MainWindow : Window
         if (exiting) return;
         if (editingServer || changingServer) { SetStatus("请先完成服务器编辑或连接操作，再退出。"); return; }
         exiting = true;
+        updateCancellation.Cancel();
+        downloadCancellation.Cancel();
         await StopServersAsync();
         localDetailsCancellation?.Cancel();
         localDetailsCancellation?.Dispose();
@@ -1921,8 +1931,6 @@ public partial class MainWindow : Window
         smoothScrollTargets.Clear();
         timer.Stop();
         gatewayRefreshCancellation?.Cancel();
-        updateCancellation.Cancel();
-        downloadCancellation.Cancel();
         feedbackCancellation.Cancel();
         gitCancellation.Cancel();
         var downloads = activeDownloads.Values.Select(active => active.Task).ToArray();
@@ -1985,7 +1993,10 @@ public partial class MainWindow : Window
 }
 
 internal sealed record StagedUpdate(string PackagePath, string Sha256, string Version);
-internal sealed record LocalUpdateCandidate(PeerInfo Peer, SharedUpdatePackage Package, Version Version);
+internal sealed record LocalUpdateCandidate(PeerInfo Peer, SharedUpdatePackage Package, Version Version, string? ServerBindingId = null, string? ServerName = null)
+{
+    public string SourceName => ServerBindingId is null ? $"“{Peer.Nickname}”的本地源" : $"服务器“{ServerName}” / {Peer.Nickname}";
+}
 internal enum UpdateIndicatorState { Checking, Latest, Available, Downloading, Ready, Failed, DevelopmentBuild }
 
 internal sealed class ActiveDownload(CancellationTokenSource cancellation)

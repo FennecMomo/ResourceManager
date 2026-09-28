@@ -95,7 +95,9 @@ public sealed partial class NodeStore
         {
             if (!GetResourceGroups().Any(g => g.Id == id)) throw new ArgumentException("分组不存在。");
             var ids = access == GroupAccess.AllowList ? deviceIds.Distinct().ToArray() : [];
-            if (ids.Any(peer => GetPeer(peer) is null)) throw new ArgumentException("白名单中有已移除的设备，请重新选择。");
+            var workspace = GetWorkspaceDevices().ToDictionary(m => m.Profile.DeviceId);
+            if (ids.Any(peer => GetPeer(peer) is null && !workspace.ContainsKey(peer))) throw new ArgumentException("白名单中有已移除的设备，请重新选择。");
+            foreach (var idToTrust in ids.Where(workspace.ContainsKey)) TrustDeviceKey(idToTrust, workspace[idToTrust].PublicKey!);
             using var db = Open(); using var tx = db.BeginTransaction();
             using var mode = Cmd(db, "INSERT INTO group_access(group_id,access) VALUES($id,$mode) ON CONFLICT(group_id) DO UPDATE SET access=excluded.access", "$id", id, "$mode", access.ToString());
             mode.Transaction = tx; mode.ExecuteNonQuery();
@@ -117,7 +119,7 @@ public sealed partial class NodeStore
         {
             var p = GetEffectiveGroupPermission(groupId);
             return p.Access == GroupAccess.Public || p.Access == GroupAccess.AllowList && authenticatedPeer is not null &&
-                GetPeer(authenticatedPeer) is not null && p.DeviceIds.Contains(authenticatedPeer, StringComparer.Ordinal);
+                (GetPeer(authenticatedPeer) is not null || GetWorkspaceDevices().Any(m => m.Profile.DeviceId == authenticatedPeer)) && p.DeviceIds.Contains(authenticatedPeer, StringComparer.Ordinal);
         }
     }
 

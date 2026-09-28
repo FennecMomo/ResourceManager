@@ -45,7 +45,7 @@ public sealed class PeerNode : IAsyncDisposable
     {
         var settings = store.GetSettings();
         var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability,
-            "git-collaboration-v1", "resource-groups-v1", PeerProof.Capability, "resource-access-v1" };
+            "git-collaboration-v1", "resource-groups-v1", PeerProof.Capability, "resource-access-v1", "workspace-resources-v1" };
         if (reminders is not null) capabilities.Add(NodeDefaults.ReminderCapability);
         if (chat is not null) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
@@ -110,6 +110,12 @@ public sealed class PeerNode : IAsyncDisposable
             return Results.Ok(Self());
         });
         string? Visitor(HttpContext context) => context.Items["VerifiedDevice"] as string;
+        var workspacePublisher = new WorkspacePublisher(store);
+        instance.MapPost("/api/v1/workspace-resource", async (WorkspaceResourceRequest request, HttpContext context, CancellationToken token) =>
+        {
+            if (Visitor(context) != request.Requester) return Results.StatusCode(403);
+            return Results.Ok(await workspacePublisher.HandleAsync(request, context.Request.Headers["X-RM-Key"].ToString(), token));
+        });
         instance.MapPost("/api/v1/auth/hello", (PeerHello hello, HttpContext context) =>
         {
             if (hello.DeviceId != Visitor(context) || string.IsNullOrWhiteSpace(hello.Nickname) || hello.Nickname.Length > 80 ||
@@ -280,7 +286,7 @@ public sealed class PeerNode : IAsyncDisposable
     }
 }
 
-public sealed class PeerClient(NodeStore store, bool supportsReminders = false, bool supportsChat = false) : IDisposable
+public sealed class PeerClient(NodeStore store, bool supportsReminders = false, bool supportsChat = false) : IDisposable, IResourceClient
 {
     private readonly HttpClient http = new(new PeerAuthenticationHandler(store, supportsReminders, supportsChat)) { Timeout = TimeSpan.FromSeconds(8) };
     private readonly HttpClient updateHttp = new(new PeerAuthenticationHandler(store, supportsReminders, supportsChat)) { Timeout = TimeSpan.FromMinutes(2) };
