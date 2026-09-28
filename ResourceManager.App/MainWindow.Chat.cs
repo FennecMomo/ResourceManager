@@ -10,6 +10,8 @@ public partial class MainWindow
 {
     private readonly List<ChatToastWindow> chatToastWindows = [];
     private bool chatRefreshing;
+    private bool preparingChatResource;
+    private Task<ChatMessage>? chatResourcePreparation;
     public ObservableCollection<ChatConversationRow> ChatConversations { get; } = [];
     public ObservableCollection<ChatMessageRow> ChatMessages { get; } = [];
 
@@ -72,9 +74,9 @@ public partial class MainWindow
             : canChat ? $"{peerStatus.GetValueOrDefault(peer.DeviceId, "未检查")} · 离线时消息在本机排队"
                 : "此设备尚不支持 0.3.7 聊天";
         ChatSendButton.IsEnabled = canChat;
-        ChatResourceButton.IsEnabled = canChat;
+        ChatResourceButton.IsEnabled = canChat && !preparingChatResource;
         ChatMuteButton.IsEnabled = peer is not null || conversation is not null;
-        ChatClearButton.IsEnabled = conversation is not null;
+        ChatClearButton.IsEnabled = conversation is not null && !preparingChatResource;
         ChatMuteButton.Content = conversation?.MutedUntilUtc > DateTimeOffset.UtcNow ? "取消静音" : "静音 1 小时";
     }
 
@@ -106,7 +108,61 @@ public partial class MainWindow
         catch (Exception ex) { ShowError("发送聊天消息失败", ex); }
     }
 
-    private async void ChatResource_Click(object sender, RoutedEventArgs e)
+    private void ChatResource_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = new System.Windows.Controls.ContextMenu { PlacementTarget = ChatResourceButton };
+        var file = new System.Windows.Controls.MenuItem { Header = "私发文件…" };
+        var folder = new System.Windows.Controls.MenuItem { Header = "私发文件夹…" };
+        var published = new System.Windows.Controls.MenuItem { Header = "发送已发布资源卡片…" };
+        file.Click += (_, _) => SendPrivateChatResource(false);
+        folder.Click += (_, _) => SendPrivateChatResource(true);
+        published.Click += ChatPublishedResource_Click;
+        menu.Items.Add(file);
+        menu.Items.Add(folder);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(published);
+        menu.IsOpen = true;
+    }
+
+    private async void SendPrivateChatResource(bool folder)
+    {
+        var peerId = SelectedChatPeerId;
+        if (peerId is null || preparingChatResource || exiting) return;
+        if (!store.GetPeerCapabilities(peerId).Contains(NodeDefaults.PrivateResourceCapability, StringComparer.Ordinal))
+        {
+            SetStatus("对方版本不支持私发资源，请先升级到 0.4.4 或更新版本并刷新连接。");
+            return;
+        }
+        string path;
+        if (folder)
+        {
+            using var picker = new System.Windows.Forms.FolderBrowserDialog { Description = "选择私发文件夹（不会公开发布）" };
+            if (picker.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+            path = picker.SelectedPath;
+        }
+        else
+        {
+            var picker = new Microsoft.Win32.OpenFileDialog { Title = "选择私发文件（不会公开发布）", CheckFileExists = true };
+            if (picker.ShowDialog(this) != true) return;
+            path = picker.FileName;
+        }
+        preparingChatResource = true;
+        RefreshChatHeader();
+        SetStatus("正在准备私发副本，请稍候…");
+        try
+        {
+            chatResourcePreparation = Task.Run(() => chat.QueuePrivateResource(peerId, path));
+            await chatResourcePreparation;
+            if (exiting) return;
+            RefreshChatTimeline();
+            SetStatus("私发资源已加入聊天队列，不会出现在公开发布中。");
+            await PumpChatSafeAsync();
+        }
+        catch (Exception ex) { ShowError("私发资源失败", ex); }
+        finally { preparingChatResource = false; RefreshChatHeader(); }
+    }
+
+    private async void ChatPublishedResource_Click(object sender, RoutedEventArgs e)
     {
         var peerId = SelectedChatPeerId;
         if (peerId is null) return;
@@ -170,9 +226,8 @@ public partial class MainWindow
         if (peer is null) { SetStatus("该设备已移除，重新连接后才能下载资源。"); return; }
         try
         {
-            var resources = await client.GetResourcesAsync(peer);
-            var resource = resources.FirstOrDefault(item => item.Id == row.Message.ResourceId && item.Available);
-            if (resource is null) { SetStatus("资源已撤销或原文件不可用。"); return; }
+            var resource = await client.GetResourceAsync(peer, row.Message.ResourceId);
+            if (resource is null || !resource.Available) { SetStatus("资源已撤销或原文件不可用。"); return; }
             BeginDownload(peer, resource);
         }
         catch (Exception ex) { ShowError("核对资源状态失败", ex); }
@@ -194,11 +249,15 @@ public partial class MainWindow
     {
         var peerId = SelectedChatPeerId;
         if (peerId is null) return;
-        if (System.Windows.MessageBox.Show("清空此会话在本机的全部消息？不会删除对方的记录，未发送消息也会清除。",
+        if (System.Windows.MessageBox.Show("清空此会话在本机的全部消息及私发副本？对方的聊天记录和已下载文件会保留，但无法再下载这些私发资源，未发送消息也会清除。",
                 "清空本机聊天记录", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        store.ClearChatConversation(peerId);
-        RefreshChatTimeline();
-        RefreshChatConversations();
+        try
+        {
+            store.ClearChatConversation(peerId);
+            RefreshChatTimeline();
+            RefreshChatConversations();
+        }
+        catch (Exception ex) { ShowError("清空聊天记录失败", ex); }
     }
 
     private void OnChatReceived(ChatMessage message)
@@ -227,7 +286,7 @@ public partial class MainWindow
     {
         var name = store.GetPeer(message.PeerId)?.Nickname ??
                    store.GetChatConversations().FirstOrDefault(item => item.PeerId == message.PeerId)?.Nickname ?? "设备";
-        var toast = new ChatToastWindow(name, message.Kind == "Resource"
+        var toast = new ChatToastWindow(name, message.Kind is "Resource" or "PrivateResource"
             ? $"分享了资源：{message.ResourceName}" : message.Text ?? "新消息");
         chatToastWindows.Add(toast);
         toast.Loaded += (_, _) => PositionReminderWindows();
@@ -261,7 +320,12 @@ public sealed record ChatMessageRow(ChatMessage Message)
 {
     public string Author => Message.Outgoing ? "我" : "对方";
     public string Time => Message.SentUtc.ToLocalTime().ToString("MM-dd HH:mm");
-    public string Body => Message.Kind == "Resource" ? $"📦 资源卡片：{Message.ResourceName ?? Message.ResourceId}" : Message.Text ?? "";
+    public string Body => Message.Kind switch
+    {
+        "Resource" => $"📦 资源卡片：{Message.ResourceName ?? Message.ResourceId}",
+        "PrivateResource" => $"📎 私发资源：{Message.ResourceName ?? "资源"}",
+        _ => Message.Text ?? ""
+    };
     public string StateText => Message.Outgoing ? Message.State switch
     {
         "Queued" => "排队中" + (Message.Error is null ? "" : $" · {Message.Error}"),
@@ -273,5 +337,5 @@ public sealed record ChatMessageRow(ChatMessage Message)
     } : "";
     public Visibility CancelVisibility => Message.Outgoing && Message.State == "Queued" ? Visibility.Visible : Visibility.Collapsed;
     public Visibility RetryVisibility => Message.Outgoing && Message.State == "Failed" ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility DownloadVisibility => !Message.Outgoing && Message.Kind == "Resource" ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility DownloadVisibility => !Message.Outgoing && Message.Kind is "Resource" or "PrivateResource" ? Visibility.Visible : Visibility.Collapsed;
 }

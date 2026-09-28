@@ -567,20 +567,43 @@
                                     <Button x:Name="ChatMuteButton" Grid.Column="1" Content="静音 1 小时" Click="ChatMute_Click" Style="{StaticResource SecondaryButton}" Height="32" Margin="0,0,8,0" IsEnabled="False"/>
                                     <Button x:Name="ChatClearButton" Grid.Column="2" Content="清空本机记录" Click="ChatClear_Click" Style="{StaticResource DangerButton}" Height="32" IsEnabled="False"/>
                                 </Grid>
-                                <ListBox x:Name="ChatMessageList" Grid.Row="2" ItemsSource="{Binding ChatMessages}" SelectionChanged="ChatMessage_SelectionChanged">
-                                    <ListBox.ItemTemplate><DataTemplate><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                        <StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Author}" FontWeight="SemiBold" Foreground="#53647B" FontSize="12"/>
-                                            <TextBlock Text="{Binding Time}" Foreground="#708099" FontSize="11" Margin="8,0,0,0"/></StackPanel>
-                                        <StackPanel Grid.Row="1" Margin="0,5,0,0">
-                                            <TextBlock Text="{Binding Body}" Foreground="{StaticResource Ink}" FontSize="13" TextWrapping="Wrap"/>
-                                            <TextBlock Text="{Binding StateText}" Foreground="#708099" FontSize="11" Margin="0,4,0,0"/>
-                                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                                <Button Content="取消发送" Click="ChatCancel_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding CancelVisibility}" Margin="0,0,7,0"/>
-                                                <Button Content="重试" Click="ChatRetry_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding RetryVisibility}" Margin="0,0,7,0"/>
-                                                <Button Content="下载资源" Click="ChatDownload_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding DownloadVisibility}"/>
+                                <ListBox x:Name="ChatMessageList" Grid.Row="2" ItemsSource="{Binding ChatMessages}"
+                                         Background="#F3F5F7" BorderThickness="0" Padding="10"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="ChatMessage_SelectionChanged">
+                                    <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        <Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,7"/>
+                                        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate></Setter.Value></Setter>
+                                    </Style></ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate><DataTemplate>
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                                            <StackPanel x:Name="MessagePanel" Grid.Column="0" Grid.ColumnSpan="2" HorizontalAlignment="Left" MaxWidth="460">
+                                                <StackPanel x:Name="MessageMeta" Orientation="Horizontal" Margin="2,0,2,5">
+                                                    <TextBlock Text="{Binding Author}" Foreground="#53647B" FontSize="11"/>
+                                                    <TextBlock Text="{Binding Time}" Foreground="#708099" FontSize="11" Margin="8,0,0,0"/>
+                                                </StackPanel>
+                                                <Border x:Name="MessageBubble" Background="White" BorderBrush="#E1E6EB" BorderThickness="1" CornerRadius="10" Padding="12,9">
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Body}" Foreground="{StaticResource Ink}" FontSize="14" TextWrapping="Wrap"/>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Button Content="取消发送" Click="ChatCancel_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding CancelVisibility}" Margin="0,6,7,0"/>
+                                                            <Button Content="重试" Click="ChatRetry_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding RetryVisibility}" Margin="0,6,7,0"/>
+                                                            <Button Content="下载资源" Click="ChatDownload_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding DownloadVisibility}" Margin="0,6,0,0"/>
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </Border>
+                                                <TextBlock x:Name="MessageState" Text="{Binding StateText}" Foreground="#708099" FontSize="11" Margin="2,4,2,0" TextWrapping="Wrap"/>
                                             </StackPanel>
-                                        </StackPanel>
-                                    </Grid></DataTemplate></ListBox.ItemTemplate>
+                                        </Grid>
+                                        <DataTemplate.Triggers><DataTrigger Binding="{Binding Message.Outgoing}" Value="True">
+                                            <Setter TargetName="MessagePanel" Property="Grid.Column" Value="1"/>
+                                            <Setter TargetName="MessagePanel" Property="HorizontalAlignment" Value="Right"/>
+                                            <Setter TargetName="MessageMeta" Property="HorizontalAlignment" Value="Right"/>
+                                            <Setter TargetName="MessageState" Property="HorizontalAlignment" Value="Right"/>
+                                            <Setter TargetName="MessageBubble" Property="Background" Value="#B9ED99"/>
+                                            <Setter TargetName="MessageBubble" Property="BorderBrush" Value="#ADE08D"/>
+                                        </DataTrigger></DataTemplate.Triggers>
+                                    </DataTemplate></ListBox.ItemTemplate>
                                 </ListBox>
                                 <Grid Grid.Row="4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <TextBox x:Name="ChatInput" Height="56" MaxLength="2000" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" Padding="11,8" KeyDown="ChatInput_KeyDown"/>

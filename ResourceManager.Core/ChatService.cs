@@ -45,11 +45,24 @@ public sealed class ChatService
         return message;
     }
 
+    public ChatMessage QueuePrivateResource(string peerId, string path)
+    {
+        if (!store.GetPeerCapabilities(peerId).Contains(NodeDefaults.PrivateResourceCapability, StringComparer.Ordinal))
+            throw new InvalidOperationException("对方版本不支持私发资源，请先升级到 0.4.4 或更新版本。");
+        var resource = store.AddResource(path, PublishMode.Copy, peerId);
+        ChatMessage message;
+        try { message = store.QueueChatMessage(peerId, "PrivateResource", null, resource.Id, resource.Name, clock()); }
+        catch { store.RemoveResource(resource.Id, peerId); throw; }
+        MessageChanged?.Invoke(message);
+        return message;
+    }
+
     public void Cancel(string peerId, string messageId)
     {
         var message = store.GetChatMessage(peerId, messageId, true);
         if (message?.State != "Queued") throw new InvalidOperationException("只有排队中的消息可以取消。");
         store.UpdateChatState(peerId, messageId, "Canceled", error: "已取消");
+        if (message.Kind == "PrivateResource") store.RemoveResource(message.ResourceId!, peerId);
         MessageChanged?.Invoke(store.GetChatMessage(peerId, messageId, true)!);
     }
 
@@ -73,7 +86,8 @@ public sealed class ChatService
             request.SenderDeviceId == request.RecipientDeviceId ||
             !(request.Kind == "Text" && !string.IsNullOrWhiteSpace(request.Text) &&
               request.Text.Length <= MaxTextLength && request.ResourceId is null ||
-              request.Kind == "Resource" && ValidId(request.ResourceId, 100) && request.Text is null))
+              request.Kind is "Resource" or "PrivateResource" && ValidId(request.ResourceId, 100) && request.Text is null &&
+              (request.Kind != "PrivateResource" || request.ResourceId!.StartsWith("private-", StringComparison.Ordinal))))
             return new ChatReceipt(false, "聊天内容或目标设备无效。", 400);
 
         var sender = store.GetPeer(request.SenderDeviceId);
@@ -101,13 +115,12 @@ public sealed class ChatService
         try
         {
             string? resourceName = null;
-            if (request.Kind == "Resource")
+            if (request.Kind is "Resource" or "PrivateResource")
             {
-                IReadOnlyList<RemoteResource> resources;
-                try { resources = await client.GetResourcesAsync(sender, cancellationToken).ConfigureAwait(false); }
+                RemoteResource? resource;
+                try { resource = await client.GetResourceAsync(sender, request.ResourceId!, cancellationToken).ConfigureAwait(false); }
                 catch (OperationCanceledException) { throw; }
-                catch { return new ChatReceipt(false, "无法核对发布方资源目录。", 503); }
-                var resource = resources.FirstOrDefault(item => item.Id == request.ResourceId);
+                catch { return new ChatReceipt(false, "无法核对发送方资源状态。", 503); }
                 if (resource is null || !resource.Available)
                     return new ChatReceipt(false, "资源已撤销或原文件不可用。", 409);
                 resourceName = resource.Name;
@@ -158,7 +171,15 @@ public sealed class ChatService
                 SetState(message, "Failed", error: "对方版本不支持聊天。");
                 continue;
             }
-            if (message.Kind == "Resource" && !catalog.List().Any(item => item.Id == message.ResourceId && item.Available))
+            if (message.Kind == "PrivateResource" &&
+                !store.GetPeerCapabilities(peerId).Contains(NodeDefaults.PrivateResourceCapability, StringComparer.Ordinal))
+            {
+                SetState(message, "Failed", error: "对方版本不支持私发资源，请先升级到 0.4.4 或更新版本。");
+                continue;
+            }
+            if (message.Kind == "Resource" && !catalog.List().Any(item => item.Id == message.ResourceId && item.Available) ||
+                message.Kind == "PrivateResource" && (store.GetPrivateResource(message.ResourceId!, peerId) is not { } privateResource ||
+                    !catalog.Describe(privateResource).Available))
             {
                 SetState(message, "Failed", error: "资源已撤销或原文件不可用。");
                 continue;

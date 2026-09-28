@@ -58,6 +58,7 @@ public static class NodeDefaults
     public const string RouterDiscoveryCapability = "router-discovery-v1";
     public const string UpnpMappingCapability = "upnp-mapping-v1";
     public const string ReminderCapability = "reminder-v1";
+    public const string PrivateResourceCapability = "chat-private-resource-v1";
     public const string ChatCapability = "chat-v1";
     public static string LegacyDataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ResourceManager");
     public static string DataDirectory { get; private set; } = LegacyDataDirectory;

@@ -263,12 +263,19 @@ public sealed class StorageLocation(string configurationPath)
         foreach (var (database, table, column, filter) in new[]
         {
             ("resources.db", "resources", "source_path", "mode='Copy'"),
+            ("resources.db", "private_resources", "source_path", "mode='Copy'"),
             ("feedback.db", "draft_attachments", "staged_path", "1=1")
         })
         {
             var file = Path.Combine(stage, database);
             if (!File.Exists(file)) continue;
             using var db = OpenDatabase(file);
+            using (var exists = db.CreateCommand())
+            {
+                exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$table";
+                exists.Parameters.AddWithValue("$table", table);
+                if ((long)exists.ExecuteScalar()! == 0 && table == "private_resources") continue;
+            }
             using var transaction = db.BeginTransaction();
             using var query = db.CreateCommand();
             query.CommandText = $"SELECT rowid,{column} FROM {table} WHERE {filter}";

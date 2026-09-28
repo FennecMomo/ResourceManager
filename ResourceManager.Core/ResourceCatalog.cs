@@ -86,9 +86,9 @@ public sealed class ResourceCatalog(NodeStore store)
         catch (UnauthorizedAccessException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note); }
     }
 
-    public IReadOnlyList<RemoteFile> ListFiles(string resourceId)
+    public IReadOnlyList<RemoteFile> ListFiles(string resourceId, string? privatePeer = null)
     {
-        var resource = store.GetResource(resourceId) ?? throw new FileNotFoundException("资源已撤销。");
+        var resource = (privatePeer is null ? store.GetResource(resourceId) : store.GetPrivateResource(resourceId, privatePeer)) ?? throw new FileNotFoundException("资源已撤销。");
         if (!Describe(resource).Available) throw new FileNotFoundException("资源原文件不可用。");
         return EnumerateFiles(resource).ToList();
     }
@@ -125,9 +125,9 @@ public sealed class ResourceCatalog(NodeStore store)
         }
     }
 
-    public FileInfo ResolveFile(string resourceId, string? relativePath)
+    public FileInfo ResolveFile(string resourceId, string? relativePath, string? privatePeer = null)
     {
-        var resource = store.GetResource(resourceId) ?? throw new FileNotFoundException("资源已撤销。");
+        var resource = (privatePeer is null ? store.GetResource(resourceId) : store.GetPrivateResource(resourceId, privatePeer)) ?? throw new FileNotFoundException("资源已撤销。");
         if (IsGitMetadataPath(resource.SourcePath)) throw new FileNotFoundException("Git 元数据不作为普通资源共享。");
         if (resource.Kind == ResourceKind.File)
         {

@@ -28,8 +28,7 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
         var peer = store.GetPeer(job.PeerId) ?? throw new InvalidOperationException("发布者已从设备列表删除。");
         try
         {
-            var resources = await client.GetResourcesAsync(peer, cancellationToken).ConfigureAwait(false);
-            var resource = resources.FirstOrDefault(r => r.Id == job.ResourceId)
+            var resource = await client.GetResourceAsync(peer, job.ResourceId, cancellationToken).ConfigureAwait(false)
                 ?? throw new FileNotFoundException("发布者已撤销资源。");
             if (!resource.Available || resource.Kind != job.Kind) throw new IOException("资源已不可用或类型已变化。");
             var entries = await client.GetFilesAsync(peer, job.ResourceId, cancellationToken).ConfigureAwait(false);

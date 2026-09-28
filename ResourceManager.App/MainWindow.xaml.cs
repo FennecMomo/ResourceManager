@@ -1919,6 +1919,11 @@ public partial class MainWindow : Window
     {
         if (exiting) return;
         exiting = true;
+        if (chatResourcePreparation is not null)
+        {
+            try { await chatResourcePreparation; }
+            catch (Exception ex) { AppLog.Write("退出时等待私发副本失败", ex); }
+        }
         storageTimer.Stop();
         storageWatcher?.Dispose();
         storageCancellation.Cancel();

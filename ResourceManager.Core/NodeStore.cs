@@ -10,6 +10,7 @@ public sealed partial class NodeStore
     private readonly string connectionString;
     public string DataDirectory { get; }
     public string LibraryDirectory => Path.Combine(DataDirectory, "library");
+    public string PrivateResourceDirectory => Path.Combine(DataDirectory, "chat-resources");
 
     public NodeStore(string? dataDirectory = null)
     {
@@ -42,6 +43,8 @@ public sealed partial class NodeStore
                 external_port INTEGER NOT NULL, internal_port INTEGER NOT NULL, lease_seconds INTEGER NOT NULL,
                 last_verified TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS resources (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, mode TEXT NOT NULL, source_path TEXT NOT NULL, published_utc TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS private_resources (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL,
+                mode TEXT NOT NULL, source_path TEXT NOT NULL, published_utc TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', private_peer TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS favorites (peer_id TEXT NOT NULL, resource_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(peer_id, resource_id));
             CREATE TABLE IF NOT EXISTS downloads (id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, resource_id TEXT NOT NULL, resource_name TEXT NOT NULL, kind TEXT NOT NULL, target_path TEXT NOT NULL, status TEXT NOT NULL, downloaded_bytes INTEGER NOT NULL, total_bytes INTEGER NOT NULL, error TEXT);
             CREATE TABLE IF NOT EXISTS peer_capabilities (device_id TEXT PRIMARY KEY, capabilities TEXT NOT NULL);
@@ -478,6 +481,7 @@ public sealed partial class NodeStore
 
     public void RemovePeer(string deviceId, bool deleteChatHistory = false)
     {
+        if (deleteChatHistory) RemovePrivateResources(deviceId);
         lock (gate)
         {
             using var db = Open();
@@ -503,24 +507,27 @@ public sealed partial class NodeStore
         }
     }
 
-    public LocalResource AddResource(string sourcePath, PublishMode mode)
+    public LocalResource AddResource(string sourcePath, PublishMode mode, string? privatePeer = null)
     {
+        if (privatePeer is not null && GetPeer(privatePeer) is null) throw new InvalidOperationException("设备已移除。");
         sourcePath = Path.GetFullPath(sourcePath);
         if (sourcePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             .Any(segment => segment.Equals(".git", StringComparison.OrdinalIgnoreCase)))
             throw new ArgumentException("Git 元数据不能作为普通资源发布。", nameof(sourcePath));
         var kind = File.Exists(sourcePath) ? ResourceKind.File : Directory.Exists(sourcePath) ? ResourceKind.Folder : throw new FileNotFoundException("资源路径不存在。", sourcePath);
-        var id = Guid.NewGuid().ToString("N");
+        var id = privatePeer is null ? Guid.NewGuid().ToString("N")
+            : "private-" + Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(sourcePath));
         var storedPath = sourcePath;
+        var library = privatePeer is null ? LibraryDirectory : PrivateResourceDirectory;
         if (mode == PublishMode.Copy)
         {
-            if (StorageLocation.IsWithin(LibraryDirectory, sourcePath) ||
-                sourcePath.Equals(LibraryDirectory, StringComparison.OrdinalIgnoreCase))
+            if (StorageLocation.IsWithin(library, sourcePath) ||
+                sourcePath.Equals(library, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("不能把包含程序发布目录的文件夹复制到自身内部。");
             var copyBytes = kind == ResourceKind.File ? new FileInfo(sourcePath).Length : MeasureCopyDirectory(sourcePath);
             StorageLocation.EnsureSpace(DataDirectory, copyBytes);
-            var root = Path.Combine(LibraryDirectory, id);
+            var root = Path.Combine(library, id);
             storedPath = Path.Combine(root, name);
             Directory.CreateDirectory(root);
             try
@@ -534,7 +541,10 @@ public sealed partial class NodeStore
         lock (gate)
         {
             using var db = Open();
-            using var command = Cmd(db, "INSERT INTO resources(id,name,kind,mode,source_path,published_utc) VALUES($id,$name,$kind,$mode,$path,$time)", "$id", id, "$name", name, "$kind", kind.ToString(), "$mode", mode.ToString(), "$path", storedPath, "$time", resource.PublishedUtc.ToString("O"));
+            var insert = privatePeer is null
+                ? "INSERT INTO resources(id,name,kind,mode,source_path,published_utc) VALUES($id,$name,$kind,$mode,$path,$time)"
+                : "INSERT INTO private_resources(id,name,kind,mode,source_path,published_utc,private_peer) VALUES($id,$name,$kind,$mode,$path,$time,$peer)";
+            using var command = Cmd(db, insert, "$id", id, "$name", name, "$kind", kind.ToString(), "$mode", mode.ToString(), "$path", storedPath, "$time", resource.PublishedUtc.ToString("O"), "$peer", privatePeer);
             command.ExecuteNonQuery();
         }
         return resource;
@@ -568,12 +578,13 @@ public sealed partial class NodeStore
         }
     }
 
-    public IReadOnlyList<LocalResource> GetResources()
+    public IReadOnlyList<LocalResource> GetResources(string? privatePeer = null)
     {
         lock (gate)
         {
             using var db = Open();
-            using var command = Cmd(db, "SELECT id,name,kind,mode,source_path,published_utc,note FROM resources ORDER BY published_utc DESC");
+            var table = privatePeer is null ? "resources" : "private_resources WHERE private_peer=$peer";
+            using var command = Cmd(db, $"SELECT id,name,kind,mode,source_path,published_utc,note FROM {table} ORDER BY published_utc DESC", "$peer", privatePeer);
             using var reader = command.ExecuteReader();
             var result = new List<LocalResource>();
             while (reader.Read()) result.Add(new LocalResource(reader.GetString(0), reader.GetString(1), Enum.Parse<ResourceKind>(reader.GetString(2)), Enum.Parse<PublishMode>(reader.GetString(3)), reader.GetString(4), DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture), reader.IsDBNull(6) ? "" : reader.GetString(6)));
@@ -594,20 +605,20 @@ public sealed partial class NodeStore
         }
     }
 
-    public void RemoveResource(string id)
+    public void RemoveResource(string id, string? privatePeer = null)
     {
         LocalResource? resource;
         lock (gate)
         {
-            resource = GetResource(id);
+            resource = privatePeer is null ? GetResource(id) : GetResources(privatePeer).FirstOrDefault(r => r.Id == id);
             if (resource is null) return;
             using var db = Open();
-            using var command = Cmd(db, "DELETE FROM resources WHERE id=$id", "$id", id);
+            using var command = Cmd(db, $"DELETE FROM {(privatePeer is null ? "resources" : "private_resources")} WHERE id=$id", "$id", id);
             command.ExecuteNonQuery();
         }
         if (resource.Mode == PublishMode.Copy)
         {
-            var root = Path.Combine(LibraryDirectory, id);
+            var root = Path.Combine(privatePeer is null ? LibraryDirectory : PrivateResourceDirectory, id);
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }

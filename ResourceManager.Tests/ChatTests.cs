@@ -5,7 +5,7 @@ using ResourceManager.Core;
 
 namespace ResourceManager.Tests;
 
-public sealed class ChatTests
+public sealed partial class ChatTests
 {
     [Fact]
     public async Task OnlineSend_IsDurableAndDuplicateAckDoesNotInsertAgain()

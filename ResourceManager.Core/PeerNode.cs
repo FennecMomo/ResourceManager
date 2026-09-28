@@ -47,7 +47,7 @@ public sealed class PeerNode : IAsyncDisposable
         var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability,
             "git-collaboration-v1" };
         if (reminders is not null) capabilities.Add(NodeDefaults.ReminderCapability);
-        if (chat is not null) capabilities.Add(NodeDefaults.ChatCapability);
+        if (chat is not null) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
             capabilities.ToArray());
     }
@@ -136,6 +136,42 @@ public sealed class PeerNode : IAsyncDisposable
                 var etag = new Microsoft.Net.Http.Headers.EntityTagHeaderValue(
                     $"\"{file.Length:x}-{file.LastWriteTimeUtc.Ticks:x}\"");
                 return Results.File(File.OpenRead(file.FullName), "application/octet-stream", file.Name,
+                    file.LastWriteTimeUtc, etag, enableRangeProcessing: true);
+            }
+            catch (ArgumentException) { return Results.BadRequest(); }
+            catch (FileNotFoundException) { return Results.NotFound(); }
+        });
+        // Require both the unguessable per-message capability and the intended recipient's registered entry.
+        string? PrivateRecipient(string id, HttpContext context)
+        {
+            var peerId = context.Request.Headers["X-ResourceManager-Recipient"].ToString();
+            return store.GetPrivateResource(id, peerId) is not null &&
+                store.GetPeerEndpoints(peerId).Any(endpoint => endpoint.Ip == RemoteIp(context) && endpoint.Source != "DeviceChanged")
+                ? peerId : null;
+        }
+        instance.MapGet("/api/v1/chat/resources/{id}", (string id, HttpContext context) =>
+        {
+            var peerId = PrivateRecipient(id, context);
+            var resource = peerId is null ? null : store.GetPrivateResource(id, peerId);
+            return resource is null ? Results.NotFound() : Results.Ok(catalog.Describe(resource));
+        });
+        instance.MapGet("/api/v1/chat/resources/{id}/tree", (string id, HttpContext context) =>
+        {
+            var peerId = PrivateRecipient(id, context);
+            if (peerId is null) return Results.NotFound();
+            try { return Results.Ok(catalog.ListFiles(id, peerId)); }
+            catch (FileNotFoundException) { return Results.NotFound(); }
+        });
+        instance.MapGet("/api/v1/chat/resources/{id}/content", (string id, string? path, HttpContext context) =>
+        {
+            var peerId = PrivateRecipient(id, context);
+            if (peerId is null) return Results.NotFound();
+            try
+            {
+                var file = catalog.ResolveFile(id, path, peerId);
+                if (!file.Exists) return Results.NotFound();
+                var etag = new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{file.Length:x}-{file.LastWriteTimeUtc.Ticks:x}\"");
+                return Results.File(new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete), "application/octet-stream", file.Name,
                     file.LastWriteTimeUtc, etag, enableRangeProcessing: true);
             }
             catch (ArgumentException) { return Results.BadRequest(); }
@@ -230,7 +266,7 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
         var settings = store.GetSettings();
         var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability };
         if (supportsReminders) capabilities.Add(NodeDefaults.ReminderCapability);
-        if (supportsChat) capabilities.Add(NodeDefaults.ChatCapability);
+        if (supportsChat) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
         var hello = new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort,
             settings.Profile.Avatar, capabilities.ToArray());
         using var response = await http.PostAsJsonAsync(new Uri(Base(ip, port), "hello"), hello, Json, cancellationToken)
@@ -318,6 +354,28 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
         return (await GetCatalogAsync(peer, cancellationToken).ConfigureAwait(false)).Resources;
     }
 
+    public async Task<RemoteResource?> GetResourceAsync(PeerInfo peer, string resourceId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!resourceId.StartsWith("private-", StringComparison.Ordinal))
+            return (await GetResourcesAsync(peer, cancellationToken).ConfigureAwait(false)).FirstOrDefault(r => r.Id == resourceId);
+        await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        using var request = ResourceRequest(peer, resourceId, "");
+        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<RemoteResource>(Json, cancellationToken).ConfigureAwait(false);
+    }
+
+    private HttpRequestMessage ResourceRequest(PeerInfo peer, string resourceId, string suffix)
+    {
+        var privateResource = resourceId.StartsWith("private-", StringComparison.Ordinal);
+        var request = new HttpRequestMessage(HttpMethod.Get, Route(peer,
+            $"{(privateResource ? "chat/" : "")}resources/{Uri.EscapeDataString(resourceId)}{suffix}"));
+        if (privateResource) request.Headers.Add("X-ResourceManager-Recipient", store.GetSettings().Profile.DeviceId);
+        return request;
+    }
+
     public async Task<ReminderReceipt> SendReminderAsync(PeerInfo peer, ResourceReminderRequest reminder,
         CancellationToken cancellationToken = default)
     {
@@ -354,6 +412,8 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
         var hello = await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
         if (!(hello.Capabilities ?? []).Contains(NodeDefaults.ChatCapability, StringComparer.Ordinal))
             return new ChatReceipt(false, "对方版本不支持聊天。", 404);
+        if (message.Kind == "PrivateResource" && !(hello.Capabilities ?? []).Contains(NodeDefaults.PrivateResourceCapability, StringComparer.Ordinal))
+            return new ChatReceipt(false, "对方版本不支持私发资源，请先升级到 0.4.4 或更新版本。", 409);
         using var response = await http.PostAsJsonAsync(Route(peer, "chat/messages"), message, Json,
             cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound)
@@ -454,17 +514,16 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
         CancellationToken cancellationToken = default)
     {
         await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
-        return await http.GetFromJsonAsync<List<RemoteFile>>(
-                   Route(peer, $"resources/{Uri.EscapeDataString(resourceId)}/tree"), Json, cancellationToken)
-                   .ConfigureAwait(false) ?? [];
+        using var request = ResourceRequest(peer, resourceId, "/tree");
+        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<RemoteFile>>(Json, cancellationToken).ConfigureAwait(false) ?? [];
     }
 
     public Task<HttpResponseMessage> OpenFileAsync(PeerInfo peer, string resourceId, string relativePath,
         long offset, string? etag, CancellationToken cancellationToken = default)
     {
-        var uri = Route(peer,
-            $"resources/{Uri.EscapeDataString(resourceId)}/content?path={Uri.EscapeDataString(relativePath)}");
-        var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        var request = ResourceRequest(peer, resourceId, $"/content?path={Uri.EscapeDataString(relativePath)}");
         if (offset > 0)
         {
             request.Headers.Range = new RangeHeaderValue(offset, null);

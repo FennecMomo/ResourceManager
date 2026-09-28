@@ -204,6 +204,7 @@ public sealed partial class NodeStore
 
     public void ClearChatConversation(string peerId)
     {
+        RemovePrivateResources(peerId);
         lock (gate)
         {
             using var db = Open();
