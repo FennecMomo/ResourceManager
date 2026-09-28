@@ -169,6 +169,7 @@ public partial class MainWindow : Window
         RefreshDownloadsView();
         InitializeFeedback();
         RefreshGitProjectList();
+        InitializeServers();
         InitializeChatEditor();
         InitializeChatNotifications();
         RefreshChatConversations();
@@ -249,6 +250,7 @@ public partial class MainWindow : Window
                 : $"共享服务已启动，端口 {node.Port}；局域网自动发现不可用，可继续手动连接。");
         }
         catch (Exception ex) { SetStatus($"监听失败：{ex.Message}。可在设置中更换端口后重试。"); }
+        StartServers();
         timer.Start();
         StartStartupUpdateCheck();
         await RefreshAllAsync();
@@ -542,7 +544,8 @@ public partial class MainWindow : Window
             ("收藏", "常用资源的快捷入口和当前状态"),
             ("下载", "查看传输进度，继续中断的任务"),
             ("反馈", "向维护者提交问题、建议和使用体验"),
-            ("设置", "管理资料、连接方式和运行偏好")
+            ("设置", "管理资料、连接方式和运行偏好"),
+            ("服务器", "通过公网地址加入服务器，查看在线设备")
         };
         var page = pages[Math.Clamp(Tabs.SelectedIndex, 0, pages.Length - 1)];
         PageTitleText.Text = page.Title;
@@ -1890,7 +1893,9 @@ public partial class MainWindow : Window
     private async Task ExitAsync()
     {
         if (exiting) return;
+        if (editingServer || changingServer) { SetStatus("请先完成服务器编辑或连接操作，再退出。"); return; }
         exiting = true;
+        await StopServersAsync();
         localDetailsCancellation?.Cancel();
         localDetailsCancellation?.Dispose();
         chatNotificationTimer.Stop();

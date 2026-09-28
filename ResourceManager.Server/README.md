@@ -1,6 +1,8 @@
-# ResourceManager.Server 0.0.1
+# ResourceManager.Server 0.1.0
 
-局域网反馈服务端。服务端与 ResourceManager 客户端独立版本，兼容性通过 `feedback-v1` 协议判断。
+独立的局域网反馈与公网工作空间服务端。保持 `feedback-v1` 兼容，新增 `workspace-v1` 自动设备登记和在线名单。客户端与服务端独立版本。
+
+公网和 Linux 部署请参阅源码仓库的 [服务器部署说明](https://github.com/FennecMomo/ResourceManager/blob/codex/git-collaboration/docs/server-deployment.md)；发布包附带 `deploy/` 模板。公网仅通过 HTTPS 反向代理暴露 `/api/v1/workspace/*`，下文原有反馈接口仍按可信局域网使用。
 
 ## 启动
 

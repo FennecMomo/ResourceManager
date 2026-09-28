@@ -9,7 +9,17 @@ using ResourceManager.Server;
 
 var version = Assembly.GetExecutingAssembly().GetName().Version is { } assemblyVersion
     ? $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{assemblyVersion.Build}" : "0.0.1";
-var options = ParseOptions(args, version);
+if (args.Contains("--version")) { Console.WriteLine(version); return; }
+if (args.Contains("--help"))
+{
+    Console.WriteLine("ResourceManager.Server [check-config|doctor|migrate] [--config FILE] [--data-dir PATH] [--server-name NAME] [--api-address IP] [--api-port PORT] [--admin-port PORT] [--discovery-port PORT] [--discovery-enabled true|false] [--max-devices COUNT] [--upload-dir PATH] [--max-capacity-bytes BYTES] [--max-file-bytes BYTES]\nPrecedence: defaults < JSON < RM_* environment < command line. Exit codes: 0 success, 2 invalid configuration, 3 storage error. Run migrate only while service is stopped."); return;
+}
+ServerRuntimeOptions options;
+try { options = ServerConfiguration.Load(args, version); }
+catch (Exception ex) when (ex is ArgumentException or JsonException or IOException or UnauthorizedAccessException)
+{ Console.Error.WriteLine(JsonSerializer.Serialize(new { ok = false, code = "CONFIG_INVALID", error = ex.Message })); Environment.ExitCode = 2; return; }
+var command = args.FirstOrDefault() is "check-config" or "doctor" or "migrate" ? args[0] : null;
+if (command is not null) { Environment.ExitCode = ServerConfiguration.RunCommand(command, options); return; }
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -17,7 +27,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 builder.WebHost.ConfigureKestrel(server =>
 {
-    server.ListenAnyIP(options.ApiPort);
+    server.Listen(IPAddress.Parse(options.ApiAddress), options.ApiPort);
     server.ListenLocalhost(options.AdminPort);
     server.Limits.MaxRequestBodySize = 55L * 1024 * 1024;
 });
@@ -29,7 +39,9 @@ builder.Services.AddSingleton(new ServerStore(options.DataDirectory, options.Ser
 builder.Services.AddSingleton<SubmissionLimiter>();
 builder.Services.AddSingleton<GitHubFeedbackClient>();
 builder.Services.AddSingleton<GitHubSessionManager>();
-builder.Services.AddHostedService<FeedbackDiscoveryService>();
+if (options.DiscoveryEnabled) builder.Services.AddHostedService<FeedbackDiscoveryService>();
+builder.Services.AddSingleton<WorkspaceHub>();
+builder.Services.AddHostedService(services => services.GetRequiredService<WorkspaceHub>());
 builder.Services.AddHostedService<GitHubSyncService>();
 
 var app = builder.Build();
@@ -43,6 +55,12 @@ app.Use(async (context, next) =>
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         await context.Response.WriteAsync("管理页只允许从服务端本机访问。");
         return;
+    }
+    if (context.Request.Path.StartsWithSegments("/api/v1/workspace"))
+    {
+        var limit = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = 1024 * 1024;
+        if (context.Request.ContentLength > 1024 * 1024) { context.Response.StatusCode = 413; return; }
     }
     context.Response.Headers.XContentTypeOptions = "nosniff";
     await next();
@@ -207,6 +225,7 @@ app.MapPatch("/admin/api/github/issues/{number:int}/state", async (int number, G
     GitHubSessionManager github, CancellationToken token) =>
     await TryAsync(async () => Results.Ok(await github.SetStateAsync(number, payload.State, payload.StateReason, token))));
 
+app.MapWorkspace();
 app.Run();
 
 static string? ClientId(HttpContext context)
@@ -234,26 +253,6 @@ static string ImageContentType(string fileName) => Path.GetExtension(fileName).T
     ".png" => "image/png", ".jpg" or ".jpeg" => "image/jpeg", ".gif" => "image/gif",
     ".webp" => "image/webp", ".bmp" => "image/bmp", _ => "application/octet-stream"
 };
-
-static ServerRuntimeOptions ParseOptions(string[] values, string version)
-{
-    string? Value(string name)
-    {
-        var index = Array.FindIndex(values, item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase));
-        return index >= 0 && index + 1 < values.Length ? values[index + 1] : null;
-    }
-    int Port(string name, int fallback) => int.TryParse(Value(name), out var port) && port is > 0 and <= 65535 ? port : fallback;
-    if (values.Contains("--version", StringComparer.OrdinalIgnoreCase)) { Console.WriteLine(version); Environment.Exit(0); }
-    if (values.Contains("--help", StringComparer.OrdinalIgnoreCase))
-    {
-        Console.WriteLine("ResourceManager.Server [--data-dir PATH] [--server-name NAME] [--api-port PORT] [--admin-port PORT] [--discovery-port PORT]");
-        Environment.Exit(0);
-    }
-    var data = Value("--data-dir") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ResourceManager.Server");
-    return new ServerRuntimeOptions(data, Value("--server-name") ?? Environment.MachineName,
-        Port("--api-port", FeedbackRules.DefaultApiPort), Port("--discovery-port", FeedbackRules.DefaultDiscoveryPort),
-        Port("--admin-port", FeedbackRules.DefaultAdminPort), version);
-}
 
 sealed record StatusChange(string Status, string? Reason);
 sealed record GitHubBinding(string Owner, string Repository);

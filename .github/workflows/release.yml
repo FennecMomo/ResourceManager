@@ -49,6 +49,7 @@ jobs:
 
   server-release:
     if: startsWith(github.ref_name, 'server-v')
+    needs: server-linux-check
     runs-on: windows-latest
     steps:
       - name: 读取发布源码
@@ -73,11 +74,32 @@ jobs:
         run: dotnet test ResourceManager.Tests/ResourceManager.Tests.csproj -c Release
       - name: 构建 Windows x64 服务端
         run: dotnet publish ResourceManager.Server/ResourceManager.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o dist/server
+      - name: 构建 Linux x64 服务端
+        run: dotnet publish ResourceManager.Server/ResourceManager.Server.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o dist/server-linux
       - name: 打包服务端
         shell: pwsh
-        run: Compress-Archive -Path dist/server/*,ResourceManager.Server/README.md -DestinationPath dist/ResourceManager.Server-win-x64.zip
+        run: |
+          Copy-Item ResourceManager.Server/README.md dist/server/README.md
+          Copy-Item ResourceManager.Server/README.md dist/server-linux/README.md
+          Copy-Item deploy/server dist/server/deploy -Recurse
+          Copy-Item deploy/server dist/server-linux/deploy -Recurse
+          Compress-Archive -Path dist/server/* -DestinationPath dist/ResourceManager.Server-win-x64.zip
+          tar -czf dist/ResourceManager.Server-linux-x64.tar.gz -C dist/server-linux .
       - name: 发布服务端 GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME dist/ResourceManager.Server-win-x64.zip --title "ResourceManager Server $env:GITHUB_REF_NAME" --notes-from-tag --verify-tag
+        run: gh release create $env:GITHUB_REF_NAME dist/ResourceManager.Server-win-x64.zip dist/ResourceManager.Server-linux-x64.tar.gz --title "ResourceManager Server $env:GITHUB_REF_NAME" --notes-from-tag --verify-tag
+
+  server-linux-check:
+    if: startsWith(github.ref_name, 'server-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: 构建 Linux 自包含服务端
+        run: dotnet publish ResourceManager.Server/ResourceManager.Server.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist/server-linux
+      - name: 验证 Linux 包和接口
+        run: python3 tools/server-smoke-check.py dist/server-linux/ResourceManager.Server

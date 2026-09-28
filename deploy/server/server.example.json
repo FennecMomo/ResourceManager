@@ -1,0 +1,13 @@
+{
+  "server-name": "ResourceManager",
+  "data-dir": "/var/lib/resourcemanager",
+  "api-address": "127.0.0.1",
+  "api-port": 37644,
+  "admin-port": 37646,
+  "discovery-enabled": false,
+  "discovery-port": 37645,
+  "max-devices": 256,
+  "upload-dir": "/var/lib/resourcemanager/uploads",
+  "max-capacity-bytes": 107374182400,
+  "max-file-bytes": 1073741824
+}

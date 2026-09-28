@@ -1,0 +1,25 @@
+[Unit]
+Description=ResourceManager workspace and feedback server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=resourcemanager
+Group=resourcemanager
+WorkingDirectory=/opt/resourcemanager
+ExecStart=/opt/resourcemanager/ResourceManager.Server --config /etc/resourcemanager/server.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=35
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/resourcemanager
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

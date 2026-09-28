@@ -24,6 +24,9 @@ public sealed class StorageLocationTests
         store.MoveResourceToGroup(copy.Id, childGroup.Id);
         store.SetGroupPermission(group.Id, GroupAccess.AllowList, [peer.DeviceId]);
         var identityKey = store.GetDeviceSigningKey();
+        var server = new ServerBinding("server-binding", "迁移服务器", "https://workspace.example.com", Guid.NewGuid().ToString("N"), WorkspaceProtocol.PublicKey(WorkspaceProtocol.CreateKey()), "离线", null,
+            new("cursor", [new(new(peer.DeviceId, peer.Nickname, null, "0.6.1"), true, DateTimeOffset.UtcNow)]));
+        store.SaveServerBinding(server);
         store.TrustDeviceKey(peer.DeviceId, "migration-trust-fixture");
         store.SaveFavorite(new Favorite(peer.DeviceId, copy.Id, copy.Name, copy.Kind));
         var downloadTarget = space.Write("downloads/file.rm-part", "partial");
@@ -62,6 +65,10 @@ public sealed class StorageLocationTests
         var migratedCopy = migrated.GetResource(copy.Id)!;
         Assert.Equal(childGroup.Id, migratedCopy.GroupId);
         Assert.Equal(identityKey, migrated.GetDeviceSigningKey());
+        var migratedServer = Assert.Single(migrated.GetServerBindings());
+        Assert.Equal(server.Address, migratedServer.Address);
+        Assert.Equal(server.PublicKey, migratedServer.PublicKey);
+        Assert.Equal(peer.DeviceId, Assert.Single(migratedServer.Cached!.Members).Profile.DeviceId);
         Assert.Equal("migration-trust-fixture", migrated.GetTrustedDeviceKey(peer.DeviceId));
         Assert.True(migrated.CanAccessGroup(childGroup.Id, peer.DeviceId));
         Assert.False(migrated.CanAccessGroup(childGroup.Id, null));

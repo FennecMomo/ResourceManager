@@ -26,6 +26,9 @@ public partial class MainWindow
             chatTrayFlashing = chatFlashing,
             preparingPrivateResource = preparingChatResource,
             publishingResources = publishing,
+            editingServer = editingServer || changingServer,
+            servers = Servers.Count,
+            connectedServers = Servers.Count(s => s.Status == "在线"),
             activeDownloads = activeDownloads.Count,
             publishedResources = store.GetResources().Count,
             peers = store.GetPeers().Count,
@@ -35,6 +38,7 @@ public partial class MainWindow
         if (exiting) return new(true, Data: state);
         if (unsaved) return new(false, "unsaved_settings", state);
         if (preparingChatResource) return new(false, "preparing_private_resource", state);
+        if (editingServer || changingServer) return new(false, "editing_server", state);
         if (publishing) return new(false, "publishing_resources", state);
         return new(true, Data: state)
         {

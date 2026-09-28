@@ -1,0 +1,8 @@
+{$RM_DOMAIN} {
+    handle /api/v1/workspace/* {
+        reverse_proxy {$RM_UPSTREAM:127.0.0.1:37644}
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

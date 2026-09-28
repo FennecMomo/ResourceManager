@@ -1,0 +1,30 @@
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+    restart: unless-stopped
+    environment:
+      RM_SERVER_NAME: ${RM_SERVER_NAME:-ResourceManager}
+      RM_MAX_DEVICES: ${RM_MAX_DEVICES:-256}
+    volumes:
+      - server-data:/var/lib/resourcemanager
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      RM_DOMAIN: ${RM_DOMAIN:?Set RM_DOMAIN to your public DNS name}
+      RM_UPSTREAM: server:37644
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+volumes:
+  server-data:
+  caddy-data:
+  caddy-config:

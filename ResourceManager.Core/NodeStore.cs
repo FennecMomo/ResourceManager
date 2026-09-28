@@ -27,6 +27,7 @@ public sealed partial class NodeStore
         using var command = db.CreateCommand();
         command.CommandText = """
             PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS server_bindings(id TEXT PRIMARY KEY,json TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS peers (device_id TEXT PRIMARY KEY, ip TEXT NOT NULL, port INTEGER NOT NULL, nickname TEXT NOT NULL, avatar BLOB, last_seen TEXT);
             CREATE TABLE IF NOT EXISTS peer_notes (device_id TEXT PRIMARY KEY, note TEXT NOT NULL);
