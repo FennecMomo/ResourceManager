@@ -45,7 +45,7 @@ public sealed class PeerNode : IAsyncDisposable
     {
         var settings = store.GetSettings();
         var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability,
-            "git-collaboration-v1" };
+            "git-collaboration-v1", "resource-groups-v1" };
         if (reminders is not null) capabilities.Add(NodeDefaults.ReminderCapability);
         if (chat is not null) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
@@ -102,6 +102,7 @@ public sealed class PeerNode : IAsyncDisposable
             return Results.Ok(Self());
         });
         instance.MapGet("/api/v1/resources", () => Results.Ok(catalog.List()));
+        instance.MapGet("/api/v1/resource-catalog", () => Results.Ok(new ResourceTreeCatalog(store.GetResourceGroups(), catalog.List())));
         instance.MapPost("/api/v1/git/sync", (GitSyncRequest request) =>
         {
             if (request.Events is null || request.Known is null ||
@@ -339,13 +340,19 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
                ?? throw new InvalidDataException("目标设备未返回映射结果。");
     }
 
-    public async Task<(PeerHello Hello, IReadOnlyList<RemoteResource> Resources)> GetCatalogAsync(PeerInfo peer,
+    public async Task<(PeerHello Hello, IReadOnlyList<RemoteResource> Resources, IReadOnlyList<ResourceGroup> Groups)> GetCatalogAsync(PeerInfo peer,
         CancellationToken cancellationToken = default)
     {
         var hello = await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        if ((hello.Capabilities ?? []).Contains("resource-groups-v1", StringComparer.Ordinal))
+        {
+            var tree = await http.GetFromJsonAsync<ResourceTreeCatalog>(Route(peer, "resource-catalog"), Json, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidDataException("资源目录响应为空。");
+            return (hello, tree.Resources, tree.Groups);
+        }
         var resources = await http.GetFromJsonAsync<List<RemoteResource>>(Route(peer, "resources"), Json, cancellationToken)
                    .ConfigureAwait(false) ?? [];
-        return (hello, resources);
+        return (hello, resources, [new ResourceGroup(NodeStore.DefaultResourceGroupId, "默认组", null, 0, DateTimeOffset.UnixEpoch)]);
     }
 
     public async Task<IReadOnlyList<RemoteResource>> GetResourcesAsync(PeerInfo peer,

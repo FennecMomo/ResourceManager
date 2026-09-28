@@ -60,6 +60,14 @@ public sealed partial class NodeStore
             """;
         command.ExecuteNonQuery();
         EnsureColumn(db, "resources", "note", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(db, "resources", "group_id", "TEXT NOT NULL DEFAULT 'default'");
+        using (var groups = Cmd(db, """
+            CREATE TABLE IF NOT EXISTS resource_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,parent_id TEXT,
+                sort_order INTEGER NOT NULL,created_utc TEXT NOT NULL);
+            INSERT OR IGNORE INTO resource_groups(id,name,parent_id,sort_order,created_utc)
+                VALUES('default','默认组',NULL,0,$created);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_resource_group_name ON resource_groups(COALESCE(parent_id,''),name COLLATE NOCASE);
+            """, "$created", DateTimeOffset.UtcNow.ToString("O"))) groups.ExecuteNonQuery();
         EnsureColumn(db, "chat_messages", "auto_expire_utc", "TEXT");
         using (var migrate = db.CreateCommand())
         {
@@ -507,8 +515,9 @@ public sealed partial class NodeStore
         }
     }
 
-    public LocalResource AddResource(string sourcePath, PublishMode mode, string? privatePeer = null)
+    public LocalResource AddResource(string sourcePath, PublishMode mode, string? privatePeer = null, string groupId = DefaultResourceGroupId)
     {
+        if (privatePeer is null && !GetResourceGroups().Any(g => g.Id == groupId)) throw new ArgumentException("分组不存在。");
         if (privatePeer is not null && GetPeer(privatePeer) is null) throw new InvalidOperationException("设备已移除。");
         sourcePath = Path.GetFullPath(sourcePath);
         if (sourcePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
@@ -537,14 +546,16 @@ public sealed partial class NodeStore
             }
             catch { Directory.Delete(root, true); throw; }
         }
-        var resource = new LocalResource(id, name, kind, mode, storedPath, DateTimeOffset.UtcNow);
+        var resource = new LocalResource(id, name, kind, mode, storedPath, DateTimeOffset.UtcNow, GroupId: groupId);
         lock (gate)
         {
+            if (privatePeer is null && !GetResourceGroups().Any(g => g.Id == groupId)) groupId = DefaultResourceGroupId;
+            resource = resource with { GroupId = groupId };
             using var db = Open();
             var insert = privatePeer is null
-                ? "INSERT INTO resources(id,name,kind,mode,source_path,published_utc) VALUES($id,$name,$kind,$mode,$path,$time)"
+                ? "INSERT INTO resources(id,name,kind,mode,source_path,published_utc,group_id) VALUES($id,$name,$kind,$mode,$path,$time,$group)"
                 : "INSERT INTO private_resources(id,name,kind,mode,source_path,published_utc,private_peer) VALUES($id,$name,$kind,$mode,$path,$time,$peer)";
-            using var command = Cmd(db, insert, "$id", id, "$name", name, "$kind", kind.ToString(), "$mode", mode.ToString(), "$path", storedPath, "$time", resource.PublishedUtc.ToString("O"), "$peer", privatePeer);
+            using var command = Cmd(db, insert, "$id", id, "$name", name, "$kind", kind.ToString(), "$mode", mode.ToString(), "$path", storedPath, "$time", resource.PublishedUtc.ToString("O"), "$peer", privatePeer, "$group", groupId);
             command.ExecuteNonQuery();
         }
         return resource;
@@ -584,10 +595,11 @@ public sealed partial class NodeStore
         {
             using var db = Open();
             var table = privatePeer is null ? "resources" : "private_resources WHERE private_peer=$peer";
-            using var command = Cmd(db, $"SELECT id,name,kind,mode,source_path,published_utc,note FROM {table} ORDER BY published_utc DESC", "$peer", privatePeer);
+            var groupColumn = privatePeer is null ? "group_id" : "'default'";
+            using var command = Cmd(db, $"SELECT id,name,kind,mode,source_path,published_utc,note,{groupColumn} FROM {table} ORDER BY published_utc DESC", "$peer", privatePeer);
             using var reader = command.ExecuteReader();
             var result = new List<LocalResource>();
-            while (reader.Read()) result.Add(new LocalResource(reader.GetString(0), reader.GetString(1), Enum.Parse<ResourceKind>(reader.GetString(2)), Enum.Parse<PublishMode>(reader.GetString(3)), reader.GetString(4), DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture), reader.IsDBNull(6) ? "" : reader.GetString(6)));
+            while (reader.Read()) result.Add(new LocalResource(reader.GetString(0), reader.GetString(1), Enum.Parse<ResourceKind>(reader.GetString(2)), Enum.Parse<PublishMode>(reader.GetString(3)), reader.GetString(4), DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture), reader.IsDBNull(6) ? "" : reader.GetString(6), reader.GetString(7)));
             return result;
         }
     }

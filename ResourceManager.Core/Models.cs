@@ -28,8 +28,10 @@ public sealed record RouterSnapshot(string SnapshotToken, RouterNetworkInfo? Rou
 public sealed record RouterExposeRequest(string SnapshotToken, IReadOnlyList<string> DeviceIds);
 public sealed record RouterMappingResult(string DeviceId, bool Success, int? ExternalPort, string? WanIp, string? Error);
 public sealed record GatewayRefreshResult(int Found, int Connected, string Status, RouterNetworkInfo? Router);
-public sealed record LocalResource(string Id, string Name, ResourceKind Kind, PublishMode Mode, string SourcePath, DateTimeOffset PublishedUtc, string Note = "");
-public sealed record RemoteResource(string Id, string Name, ResourceKind Kind, PublishMode Mode, long Size, DateTimeOffset ModifiedUtc, bool Available, string Note = "");
+public sealed record ResourceGroup(string Id, string Name, string? ParentId, int SortOrder, DateTimeOffset CreatedUtc);
+public sealed record ResourceTreeCatalog(IReadOnlyList<ResourceGroup> Groups, IReadOnlyList<RemoteResource> Resources);
+public sealed record LocalResource(string Id, string Name, ResourceKind Kind, PublishMode Mode, string SourcePath, DateTimeOffset PublishedUtc, string Note = "", string GroupId = NodeStore.DefaultResourceGroupId);
+public sealed record RemoteResource(string Id, string Name, ResourceKind Kind, PublishMode Mode, long Size, DateTimeOffset ModifiedUtc, bool Available, string Note = "", string GroupId = NodeStore.DefaultResourceGroupId);
 public sealed record RemoteFile(string RelativePath, long Size, DateTimeOffset ModifiedUtc, bool IsDirectory = false);
 public sealed record Favorite(string PeerId, string ResourceId, string Name, ResourceKind Kind);
 public sealed record DownloadJob(string Id, string PeerId, string ResourceId, string ResourceName, ResourceKind Kind, string TargetPath, string Status, long DownloadedBytes, long TotalBytes, string? Error);

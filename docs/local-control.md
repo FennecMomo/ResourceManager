@@ -20,7 +20,7 @@
 
 多实例时必须指定 PID。没有运行中的客户端时，`Restart` 可以直接后台启动指定版本。仅查询状态不会停止进程、打开主窗口或修改设置。
 
-`shutdown` 遇到未保存设置或正在准备私发副本会返回拒绝原因，不显示确认弹窗、不丢弃编辑、不强杀。其他下载沿用客户端正常退出时的暂停和保存逻辑。启动返回成功需要从新进程读回匹配的 EXE 路径、版本和 `ready: true`，不能仅凭启动命令成功判断。
+`shutdown` 遇到未保存设置、正在发布资源或正在准备私发副本会返回拒绝原因，不显示确认弹窗、不丢弃编辑、不强杀。其他下载沿用客户端正常退出时的暂停和保存逻辑。启动返回成功需要从新进程读回匹配的 EXE 路径、版本和 `ready: true`，不能仅凭启动命令成功判断。
 
 旧版 EXE 在运行时无法凭新文件获得管道能力。脚本发现旧版没有通道会保留它并明确报错；需要先经过一次正常退出和新版启动，此后的切换即可使用通道。不能为迁就旧版退回桌面自动化或强制终止。
 
@@ -44,7 +44,9 @@
 
 0.4.8 增加 `unreadChatMessages`（总未读数，包含静音会话）和 `chatTrayFlashing`（是否存在触发托盘闪烁的非静音未读）。均为只读汇总，不会改变已读状态或触发提醒。
 
-退出确认先写回管道，再进入应用既有的 `ExitAsync`。`unsaved_settings`、`preparing_private_resource`、`unsupported_command`、`invalid_protocol_or_process`、`invalid_request`、`handler_failed` 都是机器可读失败原因。
+0.5.0 增加 `publishingResources`（是否正在发布文件或文件夹）；发布期间拒绝后台退出，返回 `publishing_resources`，避免打断副本写入。
+
+退出确认先写回管道，再进入应用既有的 `ExitAsync`。`unsaved_settings`、`preparing_private_resource`、`publishing_resources`、`unsupported_command`、`invalid_protocol_or_process`、`invalid_request`、`handler_failed` 都是机器可读失败原因。
 
 ## 验证
 

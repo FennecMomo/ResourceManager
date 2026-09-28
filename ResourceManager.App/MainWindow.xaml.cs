@@ -387,8 +387,10 @@ public partial class MainWindow : Window
 
     private void RefreshSelectedResources()
     {
-        var selected = (RemoteGrid.SelectedItem as ResourceRow)?.Resource.Id;
+        var selected = SelectedRemoteResource?.Resource.Id;
         RemoteResources.Clear();
+        RemoteResourceTree.Clear();
+        PeerEmptyText.ClearValue(VisibilityProperty);
         if (PeersGrid.SelectedItem is not PeerRow row)
         {
             PeerHeading.Text = "选择一台设备";
@@ -408,20 +410,7 @@ public partial class MainWindow : Window
         PeerEmptyText.Text = "这台设备还没有发布资源。";
         foreach (var resource in resources)
             RemoteResources.Add(new ResourceRow(resource, resource.Name, KindText(resource.Kind), ModeText(resource.Mode), SizeText(resource.Size), resource.Available ? "可下载" : "原文件不可用", resource.Note));
-        RemoteGrid.SelectedItem = RemoteResources.FirstOrDefault(r => r.Resource.Id == selected);
-        UpdateActions();
-    }
-
-    private void RefreshLocalView()
-    {
-        var selected = (LocalGrid.SelectedItem as LocalResourceRow)?.Resource.Id;
-        LocalResources.Clear();
-        foreach (var item in store.GetResources())
-        {
-            var info = catalog.Describe(item);
-            LocalResources.Add(new LocalResourceRow(item, item.Name, KindText(item.Kind), ModeText(item.Mode), SizeText(info.Size), info.Available ? "可用" : "原文件不可用", item.SourcePath, item.Note));
-        }
-        LocalGrid.SelectedItem = LocalResources.FirstOrDefault(r => r.Resource.Id == selected);
+        RebuildRemoteTree(selected);
         UpdateActions();
     }
 
@@ -488,6 +477,7 @@ public partial class MainWindow : Window
                     {
                         var catalog = await client.GetCatalogAsync(candidate);
                         peerCatalogs[peer.DeviceId] = catalog.Resources;
+                        peerResourceGroups[peer.DeviceId] = catalog.Groups;
                         peerCapabilities[peer.DeviceId] = catalog.Hello.Capabilities ?? [];
                         if (peerStatus.GetValueOrDefault(peer.DeviceId) != "在线")
                             store.WakeChatMessages(peer.DeviceId);
@@ -561,18 +551,8 @@ public partial class MainWindow : Window
 
     private void PeersGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSelectedResources();
 
-    private void RemoteGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
     private void FavoritesGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
 
-    private void LocalGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (LocalGrid.SelectedItem is LocalResourceRow row)
-        {
-            if (LocalNoteBox is not null) LocalNoteBox.Text = row.Note;
-        }
-        else if (LocalNoteBox is not null) LocalNoteBox.Text = "";
-        UpdateActions();
-    }
     private void DownloadsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActions();
 
     private void UpdateActions()
@@ -581,16 +561,16 @@ public partial class MainWindow : Window
             RemovePeerButton is null || RemoveResourceButton is null || RemoveFavoriteButton is null || PeerNoteButton is null ||
             SaveLocalNoteButton is null || ClearLocalNoteButton is null ||
             ResumeDownloadButton is null || OpenDownloadFolderButton is null || RemoveDownloadButton is null) return;
-        var remote = RemoteGrid.SelectedItem as ResourceRow;
+        var remote = SelectedRemoteResource;
         var peer = PeersGrid.SelectedItem as PeerRow;
         RemoteFavoriteButton.IsEnabled = remote is not null && peer?.Status == "在线";
         RemoteDownloadButton.IsEnabled = remote?.Resource.Available == true && peer?.Status == "在线";
         FavoriteDownloadButton.IsEnabled = (FavoritesGrid.SelectedItem as FavoriteRow)?.Status == "可下载";
         RemovePeerButton.IsEnabled = peer is not null;
         PeerNoteButton.IsEnabled = peer is not null;
-        RemoveResourceButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
-        SaveLocalNoteButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow;
-        ClearLocalNoteButton.IsEnabled = LocalGrid.SelectedItem is LocalResourceRow localRow && !string.IsNullOrEmpty(localRow.Note);
+        RemoveResourceButton.IsEnabled = SelectedLocalResource is LocalResourceRow;
+        SaveLocalNoteButton.IsEnabled = SelectedLocalResource is LocalResourceRow;
+        ClearLocalNoteButton.IsEnabled = SelectedLocalResource is LocalResourceRow localRow && !string.IsNullOrEmpty(localRow.Note);
         RemoveFavoriteButton.IsEnabled = FavoritesGrid.SelectedItem is FavoriteRow;
         var download = DownloadsGrid.SelectedItem as DownloadRow;
         var removing = download is not null && removingDownloads.Contains(download.Job.Id);
@@ -869,36 +849,9 @@ public partial class MainWindow : Window
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
     private void RefreshLocal_Click(object sender, RoutedEventArgs e) => RefreshLocalView();
 
-    private async void PublishFile_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new Microsoft.Win32.OpenFileDialog { Title = "选择要发布的文件" };
-        if (dialog.ShowDialog(this) == true) await PublishAsync(dialog.FileName);
-    }
-
-    private async void PublishFolder_Click(object sender, RoutedEventArgs e)
-    {
-        using var dialog = new WinForms.FolderBrowserDialog { Description = "选择要发布的文件夹" };
-        if (dialog.ShowDialog() == WinForms.DialogResult.OK) await PublishAsync(dialog.SelectedPath);
-    }
-
-    private async Task PublishAsync(string path)
-    {
-        var dialog = new PublishModeDialog(Path.GetFileName(path)) { Owner = this, Icon = Icon };
-        if (dialog.ShowDialog() != true) return;
-        var mode = dialog.SelectedMode;
-        try
-        {
-            SetStatus(mode == PublishMode.Copy ? "正在复制资源…" : "正在发布资源…");
-            await Task.Run(() => store.AddResource(path, mode));
-            RefreshLocalView();
-            SetStatus("资源已发布，已连接设备刷新后即可看到。");
-        }
-        catch (Exception ex) { ShowError("发布失败", ex); }
-    }
-
     private async void RemoveResource_Click(object sender, RoutedEventArgs e)
     {
-        if (LocalGrid.SelectedItem is not LocalResourceRow row) return;
+        if (SelectedLocalResource is not LocalResourceRow row) return;
         var message = row.Resource.Mode == PublishMode.Copy ? "撤销后，软件管理的副本也会删除。" : "撤销后，原位置的文件不会删除。";
         if (System.Windows.MessageBox.Show($"撤销“{row.Name}”？\n{message}", "确认撤销", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         try { await Task.Run(() => store.RemoveResource(row.Resource.Id)); RefreshLocalView(); SetStatus("资源已撤销。"); }
@@ -907,7 +860,7 @@ public partial class MainWindow : Window
 
     private void SaveLocalNote_Click(object sender, RoutedEventArgs e)
     {
-        if (LocalGrid.SelectedItem is not LocalResourceRow row) { SetStatus("请先选中已发布的资源。"); return; }
+        if (SelectedLocalResource is not LocalResourceRow row) { SetStatus("请先选中已发布的资源。"); return; }
         try
         {
             var text = LocalNoteBox.Text;
@@ -921,7 +874,7 @@ public partial class MainWindow : Window
 
     private void ClearLocalNote_Click(object sender, RoutedEventArgs e)
     {
-        if (LocalGrid.SelectedItem is not LocalResourceRow row) { SetStatus("请先选中已发布的资源。"); return; }
+        if (SelectedLocalResource is not LocalResourceRow row) { SetStatus("请先选中已发布的资源。"); return; }
         try
         {
             store.SetResourceNote(row.Resource.Id, "");
@@ -1018,7 +971,7 @@ public partial class MainWindow : Window
 
     private void Favorite_Click(object sender, RoutedEventArgs e)
     {
-        if (PeersGrid.SelectedItem is not PeerRow peer || RemoteGrid.SelectedItem is not ResourceRow row) return;
+        if (PeersGrid.SelectedItem is not PeerRow peer || SelectedRemoteResource is not ResourceRow row) return;
         store.SaveFavorite(new Favorite(peer.Peer.DeviceId, row.Resource.Id, row.Resource.Name, row.Resource.Kind));
         RefreshFavoritesView();
         SetStatus("已收藏资源入口。发布者离线时入口仍会保留。");
@@ -1033,7 +986,7 @@ public partial class MainWindow : Window
 
     private void DownloadRemote_Click(object sender, RoutedEventArgs e)
     {
-        if (PeersGrid.SelectedItem is not PeerRow peer || RemoteGrid.SelectedItem is not ResourceRow row) return;
+        if (PeersGrid.SelectedItem is not PeerRow peer || SelectedRemoteResource is not ResourceRow row) return;
         if (peer.Status != "在线" || !row.Resource.Available) { SetStatus("资源当前不可下载。"); return; }
         BeginDownload(peer.Peer, row.Resource);
     }
@@ -1920,7 +1873,14 @@ public partial class MainWindow : Window
     {
         if (exiting) return;
         exiting = true;
+        localDetailsCancellation?.Cancel();
+        localDetailsCancellation?.Dispose();
         chatNotificationTimer.Stop();
+        if (publishingTask is not null)
+        {
+            try { await publishingTask; }
+            catch (Exception ex) { AppLog.Write("退出时等待发布副本失败", ex); }
+        }
         if (chatResourcePreparation is not null)
         {
             try { await chatResourcePreparation; }

@@ -19,6 +19,9 @@ public sealed class StorageLocationTests
         var copy = store.AddResource(original, PublishMode.Copy);
         var reference = store.AddResource(original, PublishMode.Reference);
         store.SetResourceNote(copy.Id, "副本备注");
+        var group = store.SaveResourceGroup("迁移分组");
+        var childGroup = store.SaveResourceGroup("子分组", group.Id);
+        store.MoveResourceToGroup(copy.Id, childGroup.Id);
         store.SaveFavorite(new Favorite(peer.DeviceId, copy.Id, copy.Name, copy.Kind));
         var downloadTarget = space.Write("downloads/file.rm-part", "partial");
         store.SaveDownload(new DownloadJob("job", peer.DeviceId, copy.Id, copy.Name, copy.Kind,
@@ -54,6 +57,8 @@ public sealed class StorageLocationTests
         Assert.Equal("迁移测试", migrated.GetSettings().Profile.Nickname);
         Assert.Equal("设备备注", migrated.GetPeerNote(peer.DeviceId));
         var migratedCopy = migrated.GetResource(copy.Id)!;
+        Assert.Equal(childGroup.Id, migratedCopy.GroupId);
+        Assert.Contains(migrated.GetResourceGroups(), g => g.Id == childGroup.Id && g.ParentId == group.Id);
         Assert.True(StorageLocation.IsWithin(migratedCopy.SourcePath, space.Target));
         Assert.Equal("保留原位置", File.ReadAllText(migratedCopy.SourcePath));
         Assert.Equal("副本备注", migratedCopy.Note);

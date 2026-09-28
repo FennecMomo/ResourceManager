@@ -15,7 +15,7 @@ public sealed class ResourceCatalog(NodeStore store)
     private string? cachedUpdateKey;
     private SharedUpdatePackage? cachedUpdate;
 
-    public IReadOnlyList<RemoteResource> List() => store.GetResources().Select(Describe).ToList();
+    public IReadOnlyList<RemoteResource> List() => store.GetResources().Select(resource => Describe(resource)).ToList();
 
     public async Task<SharedUpdatePackage?> FindLatestUpdateAsync(CancellationToken cancellationToken = default)
     {
@@ -63,27 +63,27 @@ public sealed class ResourceCatalog(NodeStore store)
         finally { updateInspection.Release(); }
     }
 
-    public RemoteResource Describe(LocalResource resource)
+    public RemoteResource Describe(LocalResource resource, CancellationToken cancellationToken = default)
     {
         if (IsGitMetadataPath(resource.SourcePath))
             return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode,
-                0, resource.PublishedUtc, false, resource.Note);
+                0, resource.PublishedUtc, false, resource.Note, resource.GroupId);
         if (resource.Kind == ResourceKind.File)
         {
             var file = new FileInfo(resource.SourcePath);
             return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode,
-                file.Exists ? file.Length : 0, file.Exists ? file.LastWriteTimeUtc : resource.PublishedUtc, file.Exists, resource.Note);
+                file.Exists ? file.Length : 0, file.Exists ? file.LastWriteTimeUtc : resource.PublishedUtc, file.Exists, resource.Note, resource.GroupId);
         }
         var directory = new DirectoryInfo(resource.SourcePath);
-        if (!directory.Exists) return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note);
+        if (!directory.Exists) return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note, resource.GroupId);
         try
         {
-            var files = EnumerateFiles(resource).ToList();
+            var files = EnumerateFiles(resource, cancellationToken).ToList();
             return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, files.Where(f => !f.IsDirectory).Sum(f => f.Size),
-                files.Count == 0 ? directory.LastWriteTimeUtc : files.Max(f => f.ModifiedUtc), true, resource.Note);
+                files.Count == 0 ? directory.LastWriteTimeUtc : files.Max(f => f.ModifiedUtc), true, resource.Note, resource.GroupId);
         }
-        catch (IOException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note); }
-        catch (UnauthorizedAccessException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note); }
+        catch (IOException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note, resource.GroupId); }
+        catch (UnauthorizedAccessException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note, resource.GroupId); }
     }
 
     public IReadOnlyList<RemoteFile> ListFiles(string resourceId, string? privatePeer = null)
@@ -93,7 +93,7 @@ public sealed class ResourceCatalog(NodeStore store)
         return EnumerateFiles(resource).ToList();
     }
 
-    private static IEnumerable<RemoteFile> EnumerateFiles(LocalResource resource)
+    private static IEnumerable<RemoteFile> EnumerateFiles(LocalResource resource, CancellationToken cancellationToken = default)
     {
         if (resource.Kind == ResourceKind.File)
         {
@@ -101,21 +101,22 @@ public sealed class ResourceCatalog(NodeStore store)
             if (file.Exists) yield return new RemoteFile("", file.Length, file.LastWriteTimeUtc);
             yield break;
         }
-        foreach (var item in Walk(resource.SourcePath, "")) yield return item;
+        foreach (var item in Walk(resource.SourcePath, "", cancellationToken)) yield return item;
     }
 
-    private static IEnumerable<RemoteFile> Walk(string root, string relative)
+    private static IEnumerable<RemoteFile> Walk(string root, string relative, CancellationToken cancellationToken)
     {
         foreach (var entry in Directory.EnumerateFileSystemEntries(Path.Combine(root, relative)))
         {
             if (Path.GetFileName(entry).Equals(".git", StringComparison.OrdinalIgnoreCase)) continue;
+            cancellationToken.ThrowIfCancellationRequested();
             var attributes = File.GetAttributes(entry);
             if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
             var child = string.IsNullOrEmpty(relative) ? Path.GetFileName(entry) : Path.Combine(relative, Path.GetFileName(entry));
             if ((attributes & FileAttributes.Directory) != 0)
             {
                 yield return new RemoteFile(child.Replace('\\', '/'), 0, Directory.GetLastWriteTimeUtc(entry), true);
-                foreach (var item in Walk(root, child)) yield return item;
+                foreach (var item in Walk(root, child, cancellationToken)) yield return item;
             }
             else
             {

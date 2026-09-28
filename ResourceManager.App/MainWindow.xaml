@@ -431,14 +431,10 @@
                                 <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                     <StackPanel Margin="0,0,0,15"><TextBlock x:Name="PeerHeading" Text="选择一台设备" Style="{StaticResource CardHeading}"/><TextBlock Text="可下载的资源会直接从对方电脑传输" Style="{StaticResource Caption}" Margin="0,4,0,0"/></StackPanel>
                                     <Grid Grid.Row="1">
-                                        <ListBox x:Name="RemoteGrid" ItemsSource="{Binding RemoteResources}" SelectionChanged="RemoteGrid_SelectionChanged">
-                                            <ListBox.ItemTemplate><DataTemplate><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                                <TextBlock Style="{StaticResource ResourceGlyph}"/>
-                                                <StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" Style="{StaticResource ItemTitle}"/><TextBlock Style="{StaticResource Meta}" Margin="0,4,0,0"><Run Text="{Binding Kind}"/><Run Text="  ·  "/><Run Text="{Binding Size}"/><Run Text="  ·  "/><Run Text="{Binding Mode}"/></TextBlock><TextBlock Text="{Binding NoteText}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding NoteText}"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Meta}"><Style.Triggers><DataTrigger Binding="{Binding Note}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel>
-                                                <TextBlock Grid.Column="2" Text="{Binding Status}" Style="{StaticResource StatusTextStyle}" VerticalAlignment="Center" Margin="12,0,0,0"/>
-                                            </Grid></DataTemplate></ListBox.ItemTemplate>
-                                        </ListBox>
-                                        <TextBlock x:Name="PeerEmptyText" Text="从左侧选择一台设备，查看对方的资源。" TextAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TreeView x:Name="RemoteGrid" ItemsSource="{Binding RemoteResourceTree}" SelectedItemChanged="RemoteTree_SelectionChanged" BorderThickness="0" Background="Transparent">
+                                            <TreeView.ItemTemplate><HierarchicalDataTemplate ItemsSource="{Binding Children}"><StackPanel><StackPanel Orientation="Horizontal"><Path Data="{Binding IconGeometry}" Fill="{Binding IconFill}" Stroke="{Binding IconStroke}" StrokeThickness="1" Width="16" Height="16" Stretch="Uniform" Margin="0,0,8,0"/><TextBlock Text="{Binding Name}" TextWrapping="Wrap"/></StackPanel><TextBlock Text="{Binding RemoteDescription}" Foreground="{StaticResource Muted}" FontSize="11" Margin="25,3,0,0" TextWrapping="Wrap"/></StackPanel></HierarchicalDataTemplate></TreeView.ItemTemplate>
+                                            <TreeView.ItemContainerStyle><Style TargetType="TreeViewItem"><Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/><Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/><Setter Property="Padding" Value="4,6"/></Style></TreeView.ItemContainerStyle>
+                                        </TreeView>                                        <TextBlock x:Name="PeerEmptyText" Text="从左侧选择一台设备，查看对方的资源。" TextAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center">
                                             <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding RemoteResources.Count}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
                                         </TextBlock>
                                     </Grid>
@@ -452,39 +448,48 @@
                 </TabItem>
 
                 <TabItem Header="我的发布">
-                    <Grid Margin="28,23,28,22"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="18"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                        <Border Style="{StaticResource Card}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                            <StackPanel><TextBlock Text="分享给已连接的设备" Style="{StaticResource PageHeading}"/><TextBlock Text="只有你主动发布的文件和文件夹会被看到。" Style="{StaticResource Caption}" Margin="0,5,0,0"/></StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button Content="发布文件" Click="PublishFile_Click" Margin="0,0,8,0"/><Button Content="发布文件夹" Click="PublishFolder_Click" Style="{StaticResource SecondaryButton}"/></StackPanel>
+                    <Grid Margin="28,23,28,22"><Grid.ColumnDefinitions><ColumnDefinition Width="280" MinWidth="200"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource Card}" Padding="13"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="资源树" Style="{StaticResource CardHeading}" VerticalAlignment="Center"/>
+                                <Button Grid.Column="1" Content="刷新" Click="RefreshLocal_Click" Style="{StaticResource QuietButton}" Padding="8,0"/>
+                            </Grid>
+                            <TreeView x:Name="LocalGrid" Grid.Row="1" ItemsSource="{Binding LocalResourceTree}" SelectedItemChanged="LocalTree_SelectionChanged" TreeViewItem.Expanded="LocalTree_Expanded" BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                                <TreeView.ItemTemplate><HierarchicalDataTemplate ItemsSource="{Binding Children}"><StackPanel Orientation="Horizontal"><Path Data="{Binding IconGeometry}" Fill="{Binding IconFill}" Stroke="{Binding IconStroke}" StrokeThickness="1" Width="16" Height="16" Stretch="Uniform" Margin="0,0,8,0"/><TextBlock Text="{Binding Name}" ToolTip="{Binding Name}"/></StackPanel></HierarchicalDataTemplate></TreeView.ItemTemplate>
+                                <TreeView.ItemContainerStyle><Style TargetType="TreeViewItem"><Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/><Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/><Setter Property="Padding" Value="4,7"/></Style></TreeView.ItemContainerStyle>
+                            </TreeView>
                         </Grid></Border>
-                        <Border Grid.Row="2" Style="{StaticResource Card}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                            <Grid Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="正在发布" Style="{StaticResource CardHeading}"/><TextBlock Text="引用会跟随原文件变化；副本保留发布时的内容。" Style="{StaticResource Caption}" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="刷新" Click="RefreshLocal_Click" Style="{StaticResource QuietButton}"/></Grid>
-                            <Grid Grid.Row="1"><ListBox x:Name="LocalGrid" ItemsSource="{Binding LocalResources}" SelectionChanged="LocalGrid_SelectionChanged">
-                                <ListBox.ItemTemplate><DataTemplate><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="38"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBlock Style="{StaticResource ResourceGlyph}"/>
-                                    <StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" Style="{StaticResource ItemTitle}"/><TextBlock Style="{StaticResource Meta}" Margin="0,5,0,0"><Run Text="{Binding Kind}"/><Run Text="  ·  "/><Run Text="{Binding Size}"/><Run Text="  ·  "/><Run Text="{Binding Mode}"/></TextBlock><TextBlock Text="{Binding NoteText}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding NoteText}"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Meta}"><Style.Triggers><DataTrigger Binding="{Binding Note}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock><TextBlock Text="{Binding Path}" Style="{StaticResource Meta}" Margin="0,4,10,0" ToolTip="{Binding Path}"/></StackPanel>
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-                                        <TextBlock Text="{Binding Status}" Style="{StaticResource StatusTextStyle}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                        <Button Content="发送给" Click="SendReminderRow_Click" Style="{StaticResource SecondaryButton}" Height="30" Padding="10,0" IsEnabled="{Binding CanRemind}"/>
-                                    </StackPanel>
-                                </Grid></DataTemplate></ListBox.ItemTemplate>
-                            </ListBox><TextBlock Text="这里还没有发布的资源。&#10;点击上方按钮，选择文件或文件夹开始共享。" TextAlignment="Center" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding LocalResources.Count}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Grid>
-                            <StackPanel Grid.Row="2" Margin="0,12,0,0">
-                                <TextBlock Text="资源备注（会随资源目录显示给已连接设备）" Style="{StaticResource Caption}"/>
-                                <Grid Margin="0,6,0,8">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                    <TextBox x:Name="LocalNoteBox" MaxLength="200" ToolTip="例如：本周五前有效"/>
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
-                                        <Button x:Name="SaveLocalNoteButton" Content="保存备注" Click="SaveLocalNote_Click" IsEnabled="False" Margin="0,0,8,0"/>
-                                        <Button x:Name="ClearLocalNoteButton" Content="清空" Click="ClearLocalNote_Click" Style="{StaticResource SecondaryButton}" IsEnabled="False"/>
-                                    </StackPanel>
-                                </Grid>
-                                <Button x:Name="RemoveResourceButton" Content="撤销所选发布" Click="RemoveResource_Click" Style="{StaticResource DangerButton}" HorizontalAlignment="Left" IsEnabled="False"/>
-                            </StackPanel>
+                        <Border Grid.Column="2" Style="{StaticResource Card}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="14"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="文件信息" Style="{StaticResource PageHeading}" VerticalAlignment="Center"/>
+                                <Button x:Name="PublishButton" Grid.Column="1" Content="发布" Click="Publish_Click"/>
+                            </Grid>
+                            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
+                                <TextBlock x:Name="LocalDetailName" Text="选择左侧资源或分组" FontSize="19" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                                <TextBlock x:Name="LocalDetailInfo" Foreground="{StaticResource Ink}" TextWrapping="Wrap" LineHeight="23"/>
+                                <TextBlock x:Name="LocalDetailPath" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,12,0,16"/>
+                                <WrapPanel Margin="0,0,0,16">
+                                    <Button Content="新建分组" Click="CreateGroup_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
+                                    <Button x:Name="RenameGroupButton" Content="重命名" Click="RenameGroup_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" IsEnabled="False"/>
+                                    <Button x:Name="MovePublicationButton" Content="移动到…" Click="MovePublication_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" IsEnabled="False"/>
+                                    <Button x:Name="DeleteGroupButton" Content="删除分组" Click="DeleteGroup_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" IsEnabled="False"/>
+                                </WrapPanel>
+                                <StackPanel x:Name="LocalResourceActions" Visibility="Collapsed">
+                                    <TextBlock Text="资源备注（对已连接设备可见）" Style="{StaticResource Caption}"/>
+                                    <TextBox x:Name="LocalNoteBox" MaxLength="200" Margin="0,7,0,8"/>
+                                    <WrapPanel>
+                                        <Button x:Name="SaveLocalNoteButton" Content="保存备注" Click="SaveLocalNote_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" IsEnabled="False"/>
+                                        <Button x:Name="ClearLocalNoteButton" Content="清空备注" Click="ClearLocalNote_Click" Style="{StaticResource QuietButton}" Margin="0,0,8,8" IsEnabled="False"/>
+                                    </WrapPanel>
+                                    <WrapPanel Margin="0,12,0,0">
+                                        <Button x:Name="LocalSendButton" Content="发送给" Click="SendSelectedPublication_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
+                                        <Button x:Name="RemoveResourceButton" Content="撤销所选发布" Click="RemoveResource_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" IsEnabled="False"/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </StackPanel></ScrollViewer>
                         </Grid></Border>
                     </Grid>
                 </TabItem>
-
                 <TabItem Header="Git 协作">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel Margin="28,23,28,22">

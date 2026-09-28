@@ -25,6 +25,7 @@ public partial class MainWindow
             unreadChatMessages = chatUnreadCount,
             chatTrayFlashing = chatFlashing,
             preparingPrivateResource = preparingChatResource,
+            publishingResources = publishing,
             activeDownloads = activeDownloads.Count,
             publishedResources = store.GetResources().Count,
             peers = store.GetPeers().Count,
@@ -34,6 +35,7 @@ public partial class MainWindow
         if (exiting) return new(true, Data: state);
         if (unsaved) return new(false, "unsaved_settings", state);
         if (preparingChatResource) return new(false, "preparing_private_resource", state);
+        if (publishing) return new(false, "publishing_resources", state);
         return new(true, Data: state)
         {
             AfterResponse = () => Dispatcher.BeginInvoke(async () =>
