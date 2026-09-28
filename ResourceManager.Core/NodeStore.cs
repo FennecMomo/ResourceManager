@@ -515,6 +515,11 @@ public sealed partial class NodeStore
         var storedPath = sourcePath;
         if (mode == PublishMode.Copy)
         {
+            if (StorageLocation.IsWithin(LibraryDirectory, sourcePath) ||
+                sourcePath.Equals(LibraryDirectory, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("不能把包含程序发布目录的文件夹复制到自身内部。");
+            var copyBytes = kind == ResourceKind.File ? new FileInfo(sourcePath).Length : MeasureCopyDirectory(sourcePath);
+            StorageLocation.EnsureSpace(DataDirectory, copyBytes);
             var root = Path.Combine(LibraryDirectory, id);
             storedPath = Path.Combine(root, name);
             Directory.CreateDirectory(root);
@@ -533,6 +538,20 @@ public sealed partial class NodeStore
             command.ExecuteNonQuery();
         }
         return resource;
+    }
+
+    private static long MeasureCopyDirectory(string source)
+    {
+        long bytes = 0;
+        foreach (var entry in Directory.EnumerateFileSystemEntries(source))
+        {
+            if (Path.GetFileName(entry).Equals(".git", StringComparison.OrdinalIgnoreCase)) continue;
+            var attributes = File.GetAttributes(entry);
+            if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+            bytes = checked(bytes + ((attributes & FileAttributes.Directory) != 0
+                ? MeasureCopyDirectory(entry) : new FileInfo(entry).Length));
+        }
+        return bytes;
     }
 
     private static void CopyDirectory(string source, string target)

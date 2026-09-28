@@ -424,6 +424,7 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
         if (offset > 0 && response.StatusCode != HttpStatusCode.PartialContent) offset = 0;
         if (offset > 0 && response.Content.Headers.ContentRange?.From != offset)
             throw new InvalidDataException("协作包续传的起点与请求不一致。");
+        StorageLocation.EnsureSpace(Path.GetDirectoryName(bundle.Path)!, bundle.Size - offset);
         await using (var output = new FileStream(temporary, offset == 0 ? FileMode.Create : FileMode.Append,
                          FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous))
         await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))

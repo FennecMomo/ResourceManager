@@ -291,7 +291,7 @@
         <Border Grid.Column="0" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
             <Grid Margin="18,24,18,22">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                <StackPanel Orientation="Horizontal" Margin="5,0,0,40">
+                <StackPanel Orientation="Horizontal" Margin="5,0,0,22">
                     <Image Source="Assets/ResourceManager.png" Width="38" Height="38" Margin="0,0,11,0"/>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="资源管理器" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Ink}"/>
@@ -310,6 +310,22 @@
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="设置"/></StackPanel></ListBoxItem>
                 </ListBox>
                 <StackPanel Grid.Row="3">
+                    <Border x:Name="StorageUsagePanel" Background="#F4F8FE" CornerRadius="12" Padding="13" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock x:Name="DiskUsedText" Text="磁盘已用  正在读取…" FontSize="12" FontWeight="SemiBold"/>
+                            <ProgressBar x:Name="DiskUsageBar" Height="5" Minimum="0" Maximum="100" Margin="0,8,0,8" Background="#DFE7F1">
+                                <ProgressBar.Template><ControlTemplate TargetType="ProgressBar">
+                                    <Grid x:Name="PART_Track">
+                                        <Border Background="{TemplateBinding Background}" CornerRadius="2.5"/>
+                                        <Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}" HorizontalAlignment="Left" CornerRadius="2.5"/>
+                                    </Grid>
+                                </ControlTemplate></ProgressBar.Template>
+                            </ProgressBar>
+                            <TextBlock x:Name="ProgramSizeText" Text="本程序  正在统计…" FontSize="12"/>
+                            <TextBlock x:Name="DiskFreeText" Text="剩余  正在读取…" FontSize="12" Margin="0,4,0,0"/>
+                            <TextBlock x:Name="StorageWarningText" Text="本程序占用包含在磁盘已用中。" FontSize="10" Foreground="#64748B" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                        </StackPanel>
+                    </Border>
                     <Button x:Name="SidebarUpdateButton" Click="SidebarUpdate_Click" Height="Auto" Padding="13"
                             Background="#F4F8FE" BorderBrush="#DDE8F6" BorderThickness="1"
                             HorizontalContentAlignment="Stretch" IsEnabled="False" ToolTip="正在等待首次更新检查">
@@ -344,12 +360,6 @@
                                        FontSize="11" Foreground="#8091A8" VerticalAlignment="Center" Visibility="Collapsed"/>
                         </Grid>
                     </Button>
-                    <Border Background="#F4F8FE" CornerRadius="12" Padding="14" Margin="0,10,0,0">
-                        <StackPanel>
-                            <TextBlock Text="只分享你选择的资源" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
-                            <TextBlock Text="关闭窗口后可继续在托盘共享；退出时会停止。" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,0"/>
-                        </StackPanel>
-                    </Border>
                 </StackPanel>
             </Grid>
         </Border>
@@ -757,6 +767,15 @@
                         <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
                             <TextBlock Text="软件更新" Style="{StaticResource PageHeading}"/><TextBlock Text="每次启动会自动检查一次；仅在发现新版本时提醒，由你决定何时下载和安装。安装前会核对版本、大小和 SHA-256。" Style="{StaticResource Caption}" Margin="0,5,0,22" TextWrapping="Wrap"/>
                             <StackPanel Orientation="Horizontal"><Button x:Name="CheckUpdateButton" Content="检查更新" Click="CheckUpdate_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/><TextBlock x:Name="UpdateStatusText" Text="当前版本" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/></StackPanel>
+                        </StackPanel></Border>
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,18"><StackPanel>
+                            <TextBlock Text="存储位置" Style="{StaticResource PageHeading}"/>
+                            <TextBlock x:Name="StoragePathText" TextWrapping="Wrap" Margin="0,12,0,8"/>
+                            <TextBlock Text="资料、发布副本和内部缓存统一保存在此处。修改位置会重启程序，校验成功后切换，原数据保留。" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,14"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="更改存储位置…" Click="ChangeStorage_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,12,0"/>
+                                <Button x:Name="OldStorageButton" Content="查看旧目录并清理…" Click="OpenOldStorage_Click" Style="{StaticResource QuietButton}" Visibility="Collapsed"/>
+                            </StackPanel>
                         </StackPanel></Border>
                         <Button Content="保存设置" Click="SaveSettings_Click" HorizontalAlignment="Left" Margin="0,0,0,20"/>
                         <TextBlock Text="设备 ID" Style="{StaticResource Caption}" FontWeight="SemiBold"/><TextBlock x:Name="DeviceIdText" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,5,0,0"/>

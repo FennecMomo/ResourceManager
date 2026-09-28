@@ -111,6 +111,7 @@ public sealed class UpdateClient : IDisposable
             return destination;
 
         var temporary = Path.Combine(updateDirectory, Guid.NewGuid().ToString("N") + ".download");
+        StorageLocation.EnsureSpace(updateDirectory, size);
         try
         {
             using var response = await openResponse(cancellationToken).ConfigureAwait(false);

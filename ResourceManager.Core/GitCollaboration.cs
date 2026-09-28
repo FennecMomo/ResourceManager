@@ -179,6 +179,7 @@ public sealed class GitRepositoryService(GitCommandRunner git)
     public async Task<GitBundleInfo> CreateBundleAsync(string root, string branch, string outputDirectory, CancellationToken token)
     {
         Directory.CreateDirectory(outputDirectory);
+        StorageLocation.EnsureSpace(outputDirectory, 0);
         var operationId = Guid.NewGuid().ToString("N");
         var rawBundle = Path.Combine(outputDirectory, operationId + ".raw.bundle");
         var packagedBundle = Path.Combine(outputDirectory, operationId + ".bundle");
@@ -194,6 +195,7 @@ public sealed class GitRepositoryService(GitCommandRunner git)
             var temporary = rawBundle;
             if (lfsObjects.Length != 0)
             {
+                StorageLocation.EnsureSpace(outputDirectory, rawSize + lfsObjects.Sum(item => item.Size));
                 await using (var output = new FileStream(packagedBundle, FileMode.CreateNew, FileAccess.Write,
                                  FileShare.None, 1024 * 1024, FileOptions.Asynchronous))
                 using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))

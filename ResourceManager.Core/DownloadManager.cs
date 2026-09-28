@@ -146,6 +146,7 @@ public sealed class DownloadManager(NodeStore store, PeerClient client)
         var append = offset > 0 && response.StatusCode == HttpStatusCode.PartialContent && response.Content.Headers.ContentRange?.From == offset;
         if (!append) offset = 0;
         var responseTag = response.Headers.ETag?.ToString();
+        StorageLocation.EnsureSpace(Path.GetDirectoryName(target)!, Math.Max(0, file.Size - offset));
         if (responseTag is not null) await File.WriteAllTextAsync(tagPath, responseTag, cancellationToken).ConfigureAwait(false);
         await using (var output = new FileStream(partial, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 64, true))
         await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))

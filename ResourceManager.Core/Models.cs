@@ -59,5 +59,7 @@ public static class NodeDefaults
     public const string UpnpMappingCapability = "upnp-mapping-v1";
     public const string ReminderCapability = "reminder-v1";
     public const string ChatCapability = "chat-v1";
-    public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ResourceManager");
+    public static string LegacyDataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ResourceManager");
+    public static string DataDirectory { get; private set; } = LegacyDataDirectory;
+    public static void UseDataDirectory(string path) => DataDirectory = Path.GetFullPath(path);
 }

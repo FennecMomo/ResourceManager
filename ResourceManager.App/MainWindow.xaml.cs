@@ -93,6 +93,7 @@ public partial class MainWindow : Window
         this.startedWithWindows = startedWithWindows;
         feedbackSecrets = new FeedbackSecretStore(NodeDefaults.DataDirectory);
         InitializeComponent();
+        InitializeStorage();
         PreviewMouseWheel += MainWindow_PreviewMouseWheel;
         if (startedWithWindows)
         {
@@ -1657,6 +1658,7 @@ public partial class MainWindow : Window
             var additions = dialog.FileNames.Select(path => new FileInfo(path)).ToArray();
             FeedbackRules.ValidateAttachments(FeedbackAttachments.Select(row => (row.FileName, row.Attachment.Size))
                 .Concat(additions.Select(file => (file.Name, file.Length))));
+            StorageLocation.EnsureSpace(feedbackStore.DraftDirectory, additions.Sum(file => file.Length));
             foreach (var file in additions)
             {
                 var staged = Path.Combine(feedbackStore.DraftDirectory, Guid.NewGuid().ToString("N") + file.Extension.ToLowerInvariant());
@@ -1917,6 +1919,12 @@ public partial class MainWindow : Window
     {
         if (exiting) return;
         exiting = true;
+        storageTimer.Stop();
+        storageWatcher?.Dispose();
+        storageCancellation.Cancel();
+        feedbackDraftTimer.Stop();
+        try { if (feedbackInitialized) SaveFeedbackDraft(); }
+        catch (Exception ex) { AppLog.Write("退出时保存反馈草稿失败", ex); }
         PreviewMouseWheel -= MainWindow_PreviewMouseWheel;
         if (smoothScrollRendering) CompositionTarget.Rendering -= SmoothScroll_Rendering;
         smoothScrollRendering = false;
@@ -1967,6 +1975,17 @@ public partial class MainWindow : Window
                         Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     }
                 });
+            }
+            if (restartForStorage && Environment.ProcessPath is not null)
+            {
+                var restart = new ProcessStartInfo(Environment.ProcessPath) { UseShellExecute = false, CreateNoWindow = true };
+#if !PUBLISHED_SINGLE_FILE
+                if (Path.GetFileNameWithoutExtension(Environment.ProcessPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+                    restart.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
+#endif
+                restart.ArgumentList.Add("--storage-restart");
+                restart.ArgumentList.Add(Environment.ProcessId.ToString());
+                Process.Start(restart);
             }
             Close();
             System.Windows.Application.Current.Shutdown();

@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Threading;
+using ResourceManager.Core;
 
 namespace ResourceManager.App;
 
@@ -30,9 +31,31 @@ public partial class App : System.Windows.Application
 
     private async void App_Startup(object sender, StartupEventArgs e)
     {
-        if (e.Args.Length > 0 && e.Args[0] == "--apply-update")
+        try
         {
-            var code = await ApplyUpdateAsync(e.Args.Skip(1).ToArray());
+            if (WindowsDesktopContext.EnsureNativeDesktop(e.Args)) { Shutdown(); return; }
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show($"无法确认统一的资料位置，程序尚未打开数据库。\n\n{ex.Message}",
+                "启动失败", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(6);
+            return;
+        }
+        var arguments = e.Args.Where(argument => argument != WindowsDesktopContext.RelaunchArgument).ToArray();
+        if (arguments.Length == 2 && arguments[0] == "--storage-restart" && int.TryParse(arguments[1], out var parentId))
+        {
+            try
+            {
+                using var parent = Process.GetProcessById(parentId);
+                await parent.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(2));
+            }
+            catch (ArgumentException) { }
+            catch (TimeoutException) { Shutdown(5); return; }
+        }
+        if (arguments.Length > 0 && arguments[0] == "--apply-update")
+        {
+            var code = await ApplyUpdateAsync(arguments.Skip(1).ToArray());
             Shutdown(code);
             return;
         }
@@ -40,14 +63,17 @@ public partial class App : System.Windows.Application
         singleInstance = new SingleInstanceCoordinator();
         if (!singleInstance.IsPrimary)
         {
-            if (!e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase))
+            if (!arguments.Contains("--startup", StringComparer.OrdinalIgnoreCase))
                 await SingleInstanceCoordinator.ActivatePrimaryAsync();
             Shutdown();
             return;
         }
 
-        var startup = e.Args.Contains("--startup", StringComparer.OrdinalIgnoreCase);
+        if (!await StorageBootstrap.PrepareAsync()) { Shutdown(); return; }
+        var startup = arguments.Contains("--startup", StringComparer.OrdinalIgnoreCase);
         var window = new MainWindow(startup);
+        var storage = StorageBootstrap.Locations.Read()!;
+        StorageBootstrap.Locations.Save(storage with { Initialized = true });
         MainWindow = window;
         singleInstance.StartListening(() => Dispatcher.BeginInvoke(window.ShowWindow));
         window.Show();
