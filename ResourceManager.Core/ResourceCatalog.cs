@@ -17,12 +17,13 @@ public sealed class ResourceCatalog(NodeStore store)
 
     public IReadOnlyList<RemoteResource> List() => store.GetResources().Select(resource => Describe(resource)).ToList();
 
-    public async Task<SharedUpdatePackage?> FindLatestUpdateAsync(CancellationToken cancellationToken = default)
+    public async Task<SharedUpdatePackage?> FindLatestUpdateAsync(CancellationToken cancellationToken = default, Func<LocalResource, bool>? canAccess = null)
     {
         var candidates = new List<(LocalResource Resource, FileInfo File, Version Version)>();
         foreach (var resource in store.GetResources())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (canAccess is not null && !canAccess(resource)) continue;
             if (resource.Kind != ResourceKind.File || !UpdateFileName.IsMatch(resource.Name)) continue;
             try
             {

@@ -45,7 +45,7 @@ public sealed class PeerNode : IAsyncDisposable
     {
         var settings = store.GetSettings();
         var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability,
-            "git-collaboration-v1", "resource-groups-v1" };
+            "git-collaboration-v1", "resource-groups-v1", PeerProof.Capability, "resource-access-v1" };
         if (reminders is not null) capabilities.Add(NodeDefaults.ReminderCapability);
         if (chat is not null) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
@@ -60,9 +60,16 @@ public sealed class PeerNode : IAsyncDisposable
         builder.Services.ConfigureHttpJsonOptions(options =>
             options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
         var instance = builder.Build();
+        var authentication = new PeerAuthenticationServer(store);
         instance.Use(async (context, next) =>
         {
-            if (context.Request.Path.Value is not ("/api/v1/health" or "/api/v1/hello"))
+            var authHello = context.Request.Path == "/api/v1/auth/hello";
+            var signed = context.Request.Headers.ContainsKey("X-RM-Signature");
+            if ((signed || authHello) && !await authentication.VerifyAsync(context, authHello))
+            {
+                context.Response.StatusCode = 401; return;
+            }
+            if (context.Request.Path.Value is not ("/api/v1/health" or "/api/v1/hello" or "/api/v1/auth/hello") && !signed)
             {
                 var ip = RemoteIp(context);
                 if (!store.IsKnownIp(ip))
@@ -96,13 +103,34 @@ public sealed class PeerNode : IAsyncDisposable
                 hello.Port is < 1 or > 65535 || hello.Avatar?.Length > 512 * 1024 ||
                 hello.DeviceId == store.GetSettings().Profile.DeviceId) return Results.BadRequest("设备资料无效。");
             var ip = RemoteIp(context);
+            if (store.GetTrustedDeviceKey(hello.DeviceId) is not null) return Results.Ok(Self());
             store.UpsertPeer(new PeerInfo(hello.DeviceId, ip, hello.Port, hello.Nickname.Trim(), hello.Avatar,
                 DateTimeOffset.UtcNow));
             store.SavePeerCapabilities(hello.DeviceId, hello.Capabilities);
             return Results.Ok(Self());
         });
-        instance.MapGet("/api/v1/resources", () => Results.Ok(catalog.List()));
-        instance.MapGet("/api/v1/resource-catalog", () => Results.Ok(new ResourceTreeCatalog(store.GetResourceGroups(), catalog.List())));
+        string? Visitor(HttpContext context) => context.Items["VerifiedDevice"] as string;
+        instance.MapPost("/api/v1/auth/hello", (PeerHello hello, HttpContext context) =>
+        {
+            if (hello.DeviceId != Visitor(context) || string.IsNullOrWhiteSpace(hello.Nickname) || hello.Nickname.Length > 80 ||
+                hello.Port is < 1 or > 65535 || hello.Avatar?.Length > 512 * 1024) return Results.BadRequest();
+            try { store.TrustDeviceKey(hello.DeviceId, context.Request.Headers["X-RM-Key"].ToString()); }
+            catch (InvalidOperationException) { return Results.Unauthorized(); }
+            store.UpsertPeer(new PeerInfo(hello.DeviceId, RemoteIp(context), hello.Port, hello.Nickname.Trim(), hello.Avatar, DateTimeOffset.UtcNow));
+            store.SavePeerCapabilities(hello.DeviceId, hello.Capabilities);
+            var self = Self(); var nonce = context.Request.Headers["X-RM-Nonce"].ToString();
+            return Results.Ok(new SignedHello(self, nonce, PeerProof.PublicKey(store), PeerProof.Sign(store, PeerProof.HelloPayload(self, nonce, hello.DeviceId))));
+        });
+        IResult? AccessDenied(string id, HttpContext context)
+        {
+            var resource = store.GetResource(id);
+            if (resource is not null && store.CanAccessGroup(resource.GroupId, Visitor(context))) return null;
+            // Unknown and forbidden IDs are indistinguishable unless this device previously saw the resource.
+            return Visitor(context) is null || resource is null && store.PreviouslySawResource(id, Visitor(context)) ? Results.NotFound() : Results.StatusCode(403);
+        }
+        instance.MapGet("/api/v1/resources", (HttpContext context) => Results.Ok(store.VisibleCatalog(Visitor(context), catalog).Resources));
+        instance.MapGet("/api/v1/resource-catalog", (HttpContext context) => Results.Ok(store.VisibleCatalog(Visitor(context), catalog)));
+        instance.MapGet("/api/v1/resources/{id}", (string id, HttpContext context) => AccessDenied(id, context) ?? Results.Ok(catalog.Describe(store.GetResource(id)!)));
         instance.MapPost("/api/v1/git/sync", (GitSyncRequest request) =>
         {
             if (request.Events is null || request.Known is null ||
@@ -118,18 +146,21 @@ public sealed class PeerNode : IAsyncDisposable
             return path is null ? Results.NotFound() : Results.File(path, "application/octet-stream",
                 enableRangeProcessing: true);
         });
-        instance.MapGet("/api/v1/updates/latest", async (CancellationToken token) =>
+        instance.MapGet("/api/v1/updates/latest", async (HttpContext context, CancellationToken token) =>
         {
-            var update = await catalog.FindLatestUpdateAsync(token).ConfigureAwait(false);
-            return update is null ? Results.NotFound() : Results.Ok(update);
+            var update = await catalog.FindLatestUpdateAsync(token, resource => store.CanAccessGroup(resource.GroupId, Visitor(context))).ConfigureAwait(false);
+            var resource = update is null ? null : store.GetResource(update.ResourceId);
+            return resource is null || !store.CanAccessGroup(resource.GroupId, Visitor(context)) ? Results.NotFound() : Results.Ok(update);
         });
-        instance.MapGet("/api/v1/resources/{id}/tree", (string id) =>
+        instance.MapGet("/api/v1/resources/{id}/tree", (string id, HttpContext context) =>
         {
+            if (AccessDenied(id, context) is { } denied) return denied;
             try { return Results.Ok(catalog.ListFiles(id)); }
             catch (FileNotFoundException) { return Results.NotFound(); }
         });
-        instance.MapGet("/api/v1/resources/{id}/content", (string id, string? path) =>
+        instance.MapGet("/api/v1/resources/{id}/content", (string id, string? path, HttpContext context) =>
         {
+            if (AccessDenied(id, context) is { } denied) return denied;
             try
             {
                 var file = catalog.ResolveFile(id, path);
@@ -146,6 +177,8 @@ public sealed class PeerNode : IAsyncDisposable
         string? PrivateRecipient(string id, HttpContext context)
         {
             var peerId = context.Request.Headers["X-ResourceManager-Recipient"].ToString();
+            if (Visitor(context) is { } verified && verified != peerId) return null;
+            if (Visitor(context) is null && store.GetTrustedDeviceKey(peerId) is not null) return null;
             return store.GetPrivateResource(id, peerId) is not null &&
                 store.GetPeerEndpoints(peerId).Any(endpoint => endpoint.Ip == RemoteIp(context) && endpoint.Source != "DeviceChanged")
                 ? peerId : null;
@@ -192,6 +225,8 @@ public sealed class PeerNode : IAsyncDisposable
             instance.MapPost("/api/v1/reminders", async (ResourceReminderRequest request, HttpContext context,
                 CancellationToken token) =>
             {
+                if (Visitor(context) is { } verified ? verified != request.SenderDeviceId : store.GetTrustedDeviceKey(request.SenderDeviceId) is not null)
+                    return Results.Json(new ReminderReceipt(false, "发送方身份与握手登记不匹配。", 403), statusCode: 403);
                 var receipt = await reminders.ReceiveAsync(request, RemoteIp(context), token).ConfigureAwait(false);
                 return Results.Json(receipt, statusCode: receipt.StatusCode);
             });
@@ -201,6 +236,8 @@ public sealed class PeerNode : IAsyncDisposable
             instance.MapPost("/api/v1/chat/messages", async (ChatMessageRequest request, HttpContext context,
                 CancellationToken token) =>
             {
+                if (Visitor(context) is { } verified ? verified != request.SenderDeviceId : store.GetTrustedDeviceKey(request.SenderDeviceId) is not null)
+                    return Results.Json(new ChatReceipt(false, "发送方身份与握手登记不匹配。", 403), statusCode: 403);
                 var receipt = await chat.ReceiveAsync(request, RemoteIp(context), token).ConfigureAwait(false);
                 return Results.Json(receipt, statusCode: receipt.StatusCode);
             });
@@ -245,9 +282,9 @@ public sealed class PeerNode : IAsyncDisposable
 
 public sealed class PeerClient(NodeStore store, bool supportsReminders = false, bool supportsChat = false) : IDisposable
 {
-    private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(8) };
-    private readonly HttpClient updateHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
-    private readonly HttpClient gitHttp = new() { Timeout = TimeSpan.FromMinutes(30) };
+    private readonly HttpClient http = new(new PeerAuthenticationHandler(store, supportsReminders, supportsChat)) { Timeout = TimeSpan.FromSeconds(8) };
+    private readonly HttpClient updateHttp = new(new PeerAuthenticationHandler(store, supportsReminders, supportsChat)) { Timeout = TimeSpan.FromMinutes(2) };
+    private readonly HttpClient gitHttp = new(new PeerAuthenticationHandler(store, supportsReminders, supportsChat)) { Timeout = TimeSpan.FromMinutes(30) };
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private static Uri Base(string ip, int port)
@@ -365,7 +402,17 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
         CancellationToken cancellationToken = default)
     {
         if (!resourceId.StartsWith("private-", StringComparison.Ordinal))
-            return (await GetResourcesAsync(peer, cancellationToken).ConfigureAwait(false)).FirstOrDefault(r => r.Id == resourceId);
+        {
+            var hello = await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+            if (!(hello.Capabilities ?? []).Contains("resource-access-v1"))
+                return (await GetResourcesAsync(peer, cancellationToken).ConfigureAwait(false)).FirstOrDefault(r => r.Id == resourceId);
+            using var publicRequest = ResourceRequest(peer, resourceId, "");
+            using var publicResponse = await http.SendAsync(publicRequest, cancellationToken).ConfigureAwait(false);
+            if (publicResponse.StatusCode == HttpStatusCode.NotFound) return null;
+            if (publicResponse.StatusCode == HttpStatusCode.Forbidden) throw new UnauthorizedAccessException("无权访问此资源。");
+            publicResponse.EnsureSuccessStatusCode();
+            return await publicResponse.Content.ReadFromJsonAsync<RemoteResource>(Json, cancellationToken).ConfigureAwait(false);
+        }
         await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
         using var request = ResourceRequest(peer, resourceId, "");
         using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);

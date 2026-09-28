@@ -41,6 +41,13 @@ public sealed class PeerIntegrationTests
         using var updateClient = new UpdateClient(receiver.DataDirectory);
         var downloaded = await updateClient.DownloadAsync(update, peer, client);
         Assert.Equal(File.ReadAllBytes(publishedPath), File.ReadAllBytes(downloaded));
+        var group = publisher.SaveResourceGroup("受限更新源"); publisher.MoveResourceToGroup(published.Id, group.Id);
+        publisher.SetGroupPermission(group.Id, GroupAccess.Private, []);
+        Assert.Null(await client.GetSharedUpdateAsync(peer));
+        publisher.SetGroupPermission(group.Id, GroupAccess.AllowList, [receiver.GetSettings().Profile.DeviceId]);
+        Assert.NotNull(await client.GetSharedUpdateAsync(peer));
+        using var legacy = new HttpClient();
+        Assert.Equal(HttpStatusCode.NotFound, (await legacy.GetAsync($"http://127.0.0.1:{port}/api/v1/updates/latest")).StatusCode);
     }
 
     [Fact]

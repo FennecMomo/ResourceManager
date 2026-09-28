@@ -68,6 +68,7 @@ public sealed partial class NodeStore
                 VALUES('default','默认组',NULL,0,$created);
             CREATE UNIQUE INDEX IF NOT EXISTS ux_resource_group_name ON resource_groups(COALESCE(parent_id,''),name COLLATE NOCASE);
             """, "$created", DateTimeOffset.UtcNow.ToString("O"))) groups.ExecuteNonQuery();
+        InitializeAccessTables(db);
         EnsureColumn(db, "chat_messages", "auto_expire_utc", "TEXT");
         using (var migrate = db.CreateCommand())
         {
@@ -494,7 +495,7 @@ public sealed partial class NodeStore
         {
             using var db = Open();
             using var transaction = db.BeginTransaction();
-            var commands = new List<string> { "DELETE FROM favorites WHERE peer_id=$id", "DELETE FROM peer_notes WHERE device_id=$id", "DELETE FROM peer_endpoints WHERE device_id=$id", "DELETE FROM peer_capabilities WHERE device_id=$id", "DELETE FROM peers WHERE device_id=$id" };
+            var commands = new List<string> { "DELETE FROM group_allowlist WHERE device_id=$id", "DELETE FROM resource_viewers WHERE peer_id=$id", "DELETE FROM favorites WHERE peer_id=$id", "DELETE FROM peer_notes WHERE device_id=$id", "DELETE FROM peer_endpoints WHERE device_id=$id", "DELETE FROM peer_capabilities WHERE device_id=$id", "DELETE FROM peers WHERE device_id=$id" };
             if (deleteChatHistory)
             {
                 commands.Add("DELETE FROM chat_messages WHERE peer_id=$id");

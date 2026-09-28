@@ -120,6 +120,7 @@ public sealed class ChatService
                 RemoteResource? resource;
                 try { resource = await client.GetResourceAsync(sender, request.ResourceId!, cancellationToken).ConfigureAwait(false); }
                 catch (OperationCanceledException) { throw; }
+                catch (UnauthorizedAccessException) { return new ChatReceipt(false, "资源不可访问或已撤销。", 409); }
                 catch { return new ChatReceipt(false, "无法核对发送方资源状态。", 503); }
                 if (resource is null || !resource.Available)
                     return new ChatReceipt(false, "资源已撤销或原文件不可用。", 409);

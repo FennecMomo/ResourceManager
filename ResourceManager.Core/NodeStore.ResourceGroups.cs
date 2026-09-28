@@ -91,6 +91,8 @@ public sealed partial class NodeStore
                 using var resources = Cmd(db, revokeResources ? "DELETE FROM resources WHERE group_id=$id"
                     : "UPDATE resources SET group_id='default' WHERE group_id=$id", "$id", groupId);
                 resources.Transaction = transaction; resources.ExecuteNonQuery();
+                using var policy = Cmd(db, "DELETE FROM group_access WHERE group_id=$id; DELETE FROM group_allowlist WHERE group_id=$id", "$id", groupId);
+                policy.Transaction = transaction; policy.ExecuteNonQuery();
                 using var group = Cmd(db, "DELETE FROM resource_groups WHERE id=$id", "$id", groupId);
                 group.Transaction = transaction; group.ExecuteNonQuery();
             }

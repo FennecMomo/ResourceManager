@@ -19,10 +19,10 @@ public partial class MainWindow
     private int localDetailsGeneration;
     private CancellationTokenSource? localDetailsCancellation;
 
-    internal static Dictionary<string, ResourceTreeNode> BuildGroupTree(IReadOnlyList<ResourceGroup> groups, ObservableCollection<ResourceTreeNode> roots)
+    internal static Dictionary<string, ResourceTreeNode> BuildGroupTree(IReadOnlyList<ResourceGroup> groups, ObservableCollection<ResourceTreeNode> roots, bool ensureDefault = true)
     {
         var unique = groups.Where(g => !string.IsNullOrEmpty(g.Id)).GroupBy(g => g.Id).Select(g => g.First()).ToList();
-        if (!unique.Any(g => g.Id == NodeStore.DefaultResourceGroupId)) unique.Insert(0, new(NodeStore.DefaultResourceGroupId, "默认组", null, 0, DateTimeOffset.UnixEpoch));
+        if (ensureDefault && !unique.Any(g => g.Id == NodeStore.DefaultResourceGroupId)) unique.Insert(0, new(NodeStore.DefaultResourceGroupId, "默认组", null, 0, DateTimeOffset.UnixEpoch));
         var nodes = unique.ToDictionary(g => g.Id, g => new ResourceTreeNode { Key = "group:" + g.Id, Name = g.Name, GroupId = g.Id, IsGroup = true, IsExpanded = true });
         var parents = unique.ToDictionary(g => g.Id, g => g.ParentId);
         foreach (var group in unique.OrderBy(g => g.SortOrder).ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Id))
@@ -69,12 +69,13 @@ public partial class MainWindow
     {
         RemoteResourceTree.Clear();
         var peer = (PeersGrid.SelectedItem as PeerRow)?.Peer.DeviceId;
-        var groups = BuildGroupTree(peer is null ? [] : peerResourceGroups.GetValueOrDefault(peer) ?? [], RemoteResourceTree);
+        var groups = BuildGroupTree(peer is null ? [] : peerResourceGroups.GetValueOrDefault(peer) ?? [], RemoteResourceTree, ensureDefault: false);
         foreach (var row in RemoteResources.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase).ThenBy(r => r.Resource.Id))
         {
             var node = new ResourceTreeNode { Key = "resource:" + row.Resource.Id, Name = row.Name, GroupId = row.Resource.GroupId,
                 RemoteRow = row, IsFolder = row.Resource.Kind == ResourceKind.Folder, IsSelected = row.Resource.Id == selectedResource };
-            (groups.GetValueOrDefault(row.Resource.GroupId) ?? groups[NodeStore.DefaultResourceGroupId]).Children.Add(node);
+            if (groups.TryGetValue(row.Resource.GroupId, out var parent)) parent.Children.Add(node);
+            else RemoteResourceTree.Add(node);
         }
         PeerEmptyText.Visibility = RemoteResourceTree.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -93,6 +94,7 @@ public partial class MainWindow
         LocalDetailPath.Text = node?.Path ?? "分组只整理发布入口，不移动磁盘文件。";
         LocalResourceActions.Visibility = node?.LocalRow is null ? Visibility.Collapsed : Visibility.Visible;
         LocalNoteBox.Text = node?.LocalRow?.Note ?? "";
+        GroupPermissionButton.IsEnabled = node is { IsGroup: true };
         RenameGroupButton.IsEnabled = DeleteGroupButton.IsEnabled = node is { IsGroup: true } && node.GroupId != NodeStore.DefaultResourceGroupId;
         MovePublicationButton.IsEnabled = node?.LocalRow is not null || RenameGroupButton.IsEnabled;
         LocalSendButton.IsEnabled = node?.LocalRow?.CanRemind == true;
@@ -102,18 +104,18 @@ public partial class MainWindow
         if (node.IsGroup)
         {
             var ids = store.GetResourceGroupSubtree(node.GroupId);
-            LocalDetailInfo.Text = $"资源分组\n包含 {store.GetResources().Count(r => ids.Contains(r.GroupId))} 个发布项（含子分组）\n点击发布会添加到这个分组。";
+            LocalDetailInfo.Text = $"资源分组\n包含 {store.GetResources().Count(r => ids.Contains(r.GroupId))} 个发布项（含子分组）\n点击发布会添加到这个分组。\n{PermissionDescription(node.GroupId)}";
             return;
         }
         var groupName = GroupPath(node.GroupId);
         if (node.LocalRow is not { } row)
         {
-            LocalDetailInfo.Text = $"{(node.IsFolder ? "文件夹" : "文件")}\n所属分组：{groupName}\n这是已发布文件夹内的内容，不是独立发布项。";
+            LocalDetailInfo.Text = $"{(node.IsFolder ? "文件夹" : "文件")}\n所属分组：{groupName}\n{PermissionDescription(node.GroupId)}\n这是已发布文件夹内的内容，不是独立发布项。";
             if (!node.IsFolder && node.Path is { } path)
                 try { LocalDetailInfo.Text += $"\n大小：{SizeText(new FileInfo(path).Length)}\n修改时间：{File.GetLastWriteTime(path):yyyy-MM-dd HH:mm}"; } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { LocalDetailInfo.Text += "\n文件已不可用，请刷新。"; }
             return;
         }
-        LocalDetailInfo.Text = $"{row.Kind} · {row.Mode}\n状态：{row.Status}\n所属分组：{groupName}\n发布时间：{row.Resource.PublishedUtc.LocalDateTime:yyyy-MM-dd HH:mm}\n大小：{row.Size}";
+        LocalDetailInfo.Text = $"{row.Kind} · {row.Mode}\n状态：{row.Status}\n所属分组：{groupName}\n{PermissionDescription(node.GroupId)}\n发布时间：{row.Resource.PublishedUtc.LocalDateTime:yyyy-MM-dd HH:mm}\n大小：{row.Size}";
         if (row.Resource.Kind == ResourceKind.Folder)
         {
             localDetailsCancellation = new CancellationTokenSource();
@@ -122,10 +124,30 @@ public partial class MainWindow
             {
                 var info = await Task.Run(() => catalog.Describe(row.Resource, token), token);
                 if (generation == localDetailsGeneration && !exiting)
-                    LocalDetailInfo.Text = $"{row.Kind} · {row.Mode}\n状态：{(info.Available ? "可用" : "原文件不可用")}\n所属分组：{groupName}\n发布时间：{row.Resource.PublishedUtc.LocalDateTime:yyyy-MM-dd HH:mm}\n大小：{SizeText(info.Size)}";
+                    LocalDetailInfo.Text = $"{row.Kind} · {row.Mode}\n状态：{(info.Available ? "可用" : "原文件不可用")}\n所属分组：{groupName}\n{PermissionDescription(node.GroupId)}\n发布时间：{row.Resource.PublishedUtc.LocalDateTime:yyyy-MM-dd HH:mm}\n大小：{SizeText(info.Size)}";
             }
             catch (OperationCanceledException) { }
         }
+    }
+
+    private string PermissionDescription(string id)
+    {
+        var explicitPermission = store.GetGroupPermission(id);
+        var effective = store.GetEffectiveGroupPermission(id);
+        var mode = GroupPermissionDialog.AccessText(effective.Access);
+        var source = effective.SourceGroupId == id ? (explicitPermission.Access == GroupAccess.Inherit ? "默认" : "本组设置") : "继承自 " + GroupPath(effective.SourceGroupId);
+        return $"访问权限：{mode}{(effective.Access == GroupAccess.AllowList ? $"（{effective.DeviceIds.Count} 台设备）" : "")} · {source}";
+    }
+
+    private void GroupPermission_Click(object sender, RoutedEventArgs e)
+    {
+        if (LocalGrid.SelectedItem is not ResourceTreeNode { IsGroup: true } node) return;
+        var group = store.GetResourceGroups().FirstOrDefault(g => g.Id == node.GroupId);
+        if (group is null) return;
+        var dialog = new GroupPermissionDialog(store, group) { Owner = this, Icon = Icon };
+        if (dialog.ShowDialog() != true) return;
+        try { store.SetGroupPermission(group.Id, dialog.Access, dialog.AllowedDevices); RefreshLocalView(); SetStatus("分组权限已保存，对方刷新目录及后续下载时生效。"); }
+        catch (Exception ex) { ShowError("保存分组权限失败", ex); }
     }
 
     private string GroupPath(string id)

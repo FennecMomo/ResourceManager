@@ -22,6 +22,9 @@ public sealed class StorageLocationTests
         var group = store.SaveResourceGroup("迁移分组");
         var childGroup = store.SaveResourceGroup("子分组", group.Id);
         store.MoveResourceToGroup(copy.Id, childGroup.Id);
+        store.SetGroupPermission(group.Id, GroupAccess.AllowList, [peer.DeviceId]);
+        var identityKey = store.GetDeviceSigningKey();
+        store.TrustDeviceKey(peer.DeviceId, "migration-trust-fixture");
         store.SaveFavorite(new Favorite(peer.DeviceId, copy.Id, copy.Name, copy.Kind));
         var downloadTarget = space.Write("downloads/file.rm-part", "partial");
         store.SaveDownload(new DownloadJob("job", peer.DeviceId, copy.Id, copy.Name, copy.Kind,
@@ -58,6 +61,10 @@ public sealed class StorageLocationTests
         Assert.Equal("设备备注", migrated.GetPeerNote(peer.DeviceId));
         var migratedCopy = migrated.GetResource(copy.Id)!;
         Assert.Equal(childGroup.Id, migratedCopy.GroupId);
+        Assert.Equal(identityKey, migrated.GetDeviceSigningKey());
+        Assert.Equal("migration-trust-fixture", migrated.GetTrustedDeviceKey(peer.DeviceId));
+        Assert.True(migrated.CanAccessGroup(childGroup.Id, peer.DeviceId));
+        Assert.False(migrated.CanAccessGroup(childGroup.Id, null));
         Assert.Contains(migrated.GetResourceGroups(), g => g.Id == childGroup.Id && g.ParentId == group.Id);
         Assert.True(StorageLocation.IsWithin(migratedCopy.SourcePath, space.Target));
         Assert.Equal("保留原位置", File.ReadAllText(migratedCopy.SourcePath));

@@ -414,6 +414,7 @@ public partial class MainWindow : Window
         UpdateActions();
     }
 
+    private readonly Dictionary<(string Peer, string Resource), string> favoriteAccessStates = [];
     private void RefreshFavoritesView()
     {
         var selected = (FavoritesGrid.SelectedItem as FavoriteRow)?.Favorite;
@@ -425,9 +426,10 @@ public partial class MainWindow : Window
             var remote = peerCatalogs.GetValueOrDefault(item.PeerId)?.FirstOrDefault(r => r.Id == item.ResourceId);
             var status = state switch
             {
-                "在线" when remote is null => "资源已撤销",
+                "在线" when remote is null => favoriteAccessStates.GetValueOrDefault((item.PeerId, item.ResourceId), "资源已撤销"),
                 "在线" when !remote.Available => "原文件不可用",
                 "在线" => "可下载",
+                "身份校验失败" => "身份校验失败",
                 "设备已变更" => "设备已变更",
                 "设备已移除" => "设备已移除",
                 _ => "离线/无法连接"
@@ -479,6 +481,18 @@ public partial class MainWindow : Window
                         peerCatalogs[peer.DeviceId] = catalog.Resources;
                         peerResourceGroups[peer.DeviceId] = catalog.Groups;
                         peerCapabilities[peer.DeviceId] = catalog.Hello.Capabilities ?? [];
+                        foreach (var favorite in store.GetFavorites().Where(f => f.PeerId == peer.DeviceId))
+                        {
+                            favoriteAccessStates.Remove((peer.DeviceId, favorite.ResourceId));
+                            if (catalog.Resources.Any(r => r.Id == favorite.ResourceId) || !(catalog.Hello.Capabilities ?? []).Contains("resource-access-v1")) continue;
+                            try
+                            {
+                                var found = await client.GetResourceAsync(candidate, favorite.ResourceId);
+                                favoriteAccessStates[(peer.DeviceId, favorite.ResourceId)] = found is null ? "资源已撤销" : "请刷新目录";
+                            }
+                            catch (UnauthorizedAccessException) { favoriteAccessStates[(peer.DeviceId, favorite.ResourceId)] = "无权访问"; }
+                            catch { favoriteAccessStates[(peer.DeviceId, favorite.ResourceId)] = "无法核对权限"; }
+                        }
                         if (peerStatus.GetValueOrDefault(peer.DeviceId) != "在线")
                             store.WakeChatMessages(peer.DeviceId);
                         peerStatus[peer.DeviceId] = "在线";
@@ -491,10 +505,14 @@ public partial class MainWindow : Window
                         store.MarkEndpointDeviceChanged(endpoint);
                         peerStatus[peer.DeviceId] = "设备已变更";
                     }
+                    catch (InvalidOperationException ex) when (ex.Message.Contains("身份"))
+                    {
+                        peerStatus[peer.DeviceId] = "身份校验失败";
+                    }
                     catch { }
                 }
                 if (connected) continue;
-                if (peerStatus.GetValueOrDefault(peer.DeviceId) != "设备已变更")
+                if (peerStatus.GetValueOrDefault(peer.DeviceId) is not ("设备已变更" or "身份校验失败"))
                     peerStatus[peer.DeviceId] = "离线";
                 peerCatalogs.Remove(peer.DeviceId);
                 peerCapabilities.Remove(peer.DeviceId);
@@ -821,7 +839,7 @@ public partial class MainWindow : Window
     private void RemovePeer_Click(object sender, RoutedEventArgs e)
     {
         if (PeersGrid.SelectedItem is not PeerRow row) return;
-        var choice = System.Windows.MessageBox.Show($"移除 {row.Nickname}？\n\n是：保留聊天记录（取消未送达消息）\n否：一并删除聊天记录\n取消：不移除设备\n\n收藏和本机备注都会删除。",
+        var choice = System.Windows.MessageBox.Show($"移除 {row.Nickname}？\n\n是：保留聊天记录（取消未送达消息）\n否：一并删除聊天记录\n取消：不移除设备\n\n收藏和本机备注都会删除，并从 {store.CountAllowedGroups(row.Peer.DeviceId)} 个分组的白名单中移除。",
             "移除设备", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (choice == MessageBoxResult.Cancel) return;
         store.RemovePeer(row.Peer.DeviceId, deleteChatHistory: choice == MessageBoxResult.No);

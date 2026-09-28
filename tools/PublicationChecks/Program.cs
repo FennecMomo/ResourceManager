@@ -68,7 +68,20 @@ internal static class Program
                 Require(!Control<Button>("DeleteGroupButton").IsEnabled && !Control<Button>("RenameGroupButton").IsEnabled, "default group mutation controls disabled");
                 var groupNode = All(window.LocalResourceTree).Single(n => n.IsGroup && n.GroupId == sub.Id); groupNode.IsSelected = true; Layout();
                 Require(Control<Button>("DeleteGroupButton").IsEnabled && Control<Button>("MovePublicationButton").IsEnabled, "ordinary group offers rename move and delete");
+                Require(Control<Button>("GroupPermissionButton").IsEnabled, "selected group exposes permission settings");
+                store.SetGroupPermission(group.Id, GroupAccess.Private, []);
                 folderNode.IsSelected = true; Layout();
+                Require(Control<TextBlock>("LocalDetailInfo").Text.Contains("私有") && Control<TextBlock>("LocalDetailInfo").Text.Contains("继承自 项目资料"), "resource details show effective inherited permission and its source");
+                usingPermissionDialog();
+                void usingPermissionDialog()
+                {
+                    var dialog = new GroupPermissionDialog(store, sub);
+                    Require(dialog.Access == GroupAccess.Inherit && !dialog.IsVisible, "permission editor loads inherited policy without opening a window");
+                    var content = (FrameworkElement)dialog.Content;
+                    content.Measure(new Size(482, 462)); content.Arrange(new Rect(0, 0, 482, 462)); content.UpdateLayout();
+                    Render(content, 482, 462);
+                    dialog.Close();
+                }
                 for (var attempt = 0; attempt < 20 && Control<TextBlock>("LocalDetailInfo").Text.Contains("选中后统计"); attempt++) await Task.Delay(25);
                 Require(!Control<TextBlock>("LocalDetailInfo").Text.Contains("选中后统计"), "selected folder size completes asynchronously");
                 foreach (var size in new[] { (1260, 780), (1010, 630) })

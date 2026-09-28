@@ -479,6 +479,7 @@
                                 <TextBlock x:Name="LocalDetailInfo" Foreground="{StaticResource Ink}" TextWrapping="Wrap" LineHeight="23"/>
                                 <TextBlock x:Name="LocalDetailPath" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,12,0,16"/>
                                 <WrapPanel Margin="0,0,0,16">
+                                    <Button x:Name="GroupPermissionButton" Content="权限设置" Click="GroupPermission_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" IsEnabled="False"/>
                                     <Button x:Name="RenameGroupButton" Content="重命名" Click="RenameGroup_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" IsEnabled="False"/>
                                     <Button x:Name="MovePublicationButton" Content="移动到…" Click="MovePublication_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" IsEnabled="False"/>
                                     <Button x:Name="DeleteGroupButton" Content="删除分组" Click="DeleteGroup_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" IsEnabled="False"/>

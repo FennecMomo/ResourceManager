@@ -182,8 +182,9 @@ public sealed class ReminderTests
         using var http = new HttpClient();
         using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-        using var response = await http.PostAsync(
-            $"http://127.0.0.1:{pair.ReceiverPeer.Port}/api/v1/reminders", content);
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{pair.ReceiverPeer.Port}/api/v1/reminders") { Content = content };
+        PeerProof.SignRequest(pair.Sender, request, pair.ReceiverPeer.DeviceId, await content.ReadAsByteArrayAsync());
+        using var response = await http.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var receipt = await response.Content.ReadFromJsonAsync<ReminderReceipt>();
