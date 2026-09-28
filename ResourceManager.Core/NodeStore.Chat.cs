@@ -6,6 +6,11 @@ namespace ResourceManager.Core;
 
 public sealed partial class NodeStore
 {
+    public bool GetChatConversationsCollapsed() => GetSetting("chat_conversations_collapsed") == "1";
+
+    public void SaveChatConversationsCollapsed(bool collapsed) =>
+        SetSetting("chat_conversations_collapsed", collapsed ? "1" : "0");
+
     public void SavePeerCapabilities(string deviceId, IEnumerable<string>? capabilities)
     {
         var json = JsonSerializer.Serialize((capabilities ?? []).Where(value => value is { Length: > 0 and <= 80 })

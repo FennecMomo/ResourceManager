@@ -90,9 +90,10 @@ public partial class MainWindow : Window
 
     public MainWindow(bool startedWithWindows = false) : this(startedWithWindows, null, true) { }
 
-    internal MainWindow(bool startedWithWindows, SettingsEditorServices? services, bool desktopIntegration)
+    internal MainWindow(bool startedWithWindows, SettingsEditorServices? services, bool desktopIntegration, Func<Task>? chatPump = null)
     {
         settingsServices = services;
+        chatPumpOverride = chatPump;
         this.startedWithWindows = startedWithWindows;
         feedbackSecrets = new FeedbackSecretStore(NodeDefaults.DataDirectory);
         InitializeComponent();
@@ -165,6 +166,7 @@ public partial class MainWindow : Window
         RefreshDownloadsView();
         InitializeFeedback();
         RefreshGitProjectList();
+        InitializeChatEditor();
         RefreshChatConversations();
         UpdatePageHeader();
     }

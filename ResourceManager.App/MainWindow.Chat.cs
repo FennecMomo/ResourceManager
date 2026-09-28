@@ -8,6 +8,66 @@ namespace ResourceManager.App;
 
 public partial class MainWindow
 {
+    private readonly Func<Task>? chatPumpOverride;
+    private bool chatConversationsCollapsed;
+    private bool chatInputComposing;
+    private int chatCompositionGeneration;
+
+    private void InitializeChatEditor()
+    {
+        ApplyChatConversationLayout(store.GetChatConversationsCollapsed());
+        TextCompositionManager.AddPreviewTextInputStartHandler(ChatInput, ChatCompositionStarted);
+        TextCompositionManager.AddPreviewTextInputUpdateHandler(ChatInput, ChatCompositionStarted);
+        TextCompositionManager.AddPreviewTextInputHandler(ChatInput, ChatCompositionCompleted);
+        ChatInput.LostKeyboardFocus += (_, _) =>
+        {
+            chatCompositionGeneration++;
+            chatInputComposing = false;
+        };
+    }
+
+    private void ChatCompositionStarted(object sender, TextCompositionEventArgs e)
+    {
+        chatCompositionGeneration++;
+        chatInputComposing = true;
+    }
+
+    private void ChatCompositionCompleted(object sender, TextCompositionEventArgs e)
+    {
+        if (!chatInputComposing) return;
+        var generation = chatCompositionGeneration;
+        // Some IMEs finish composition before delivering the confirming Enter. Keep the
+        // guard for the remainder of this input dispatch, without swallowing the IME event.
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+        {
+            if (generation == chatCompositionGeneration) chatInputComposing = false;
+        });
+    }
+
+    private void ApplyChatConversationLayout(bool collapsed)
+    {
+        chatConversationsCollapsed = collapsed;
+        ChatConversationsColumn.Width = new GridLength(collapsed ? 48 : 270);
+        ChatConversationPanel.Padding = new Thickness(collapsed ? 6 : 13);
+        ChatConversationHeading.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        ChatConversationList.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        ChatConversationsToggle.Content = collapsed ? "›" : "‹";
+        var label = collapsed ? "展开会话栏" : "收起会话栏";
+        ChatConversationsToggle.ToolTip = label;
+        System.Windows.Automation.AutomationProperties.SetName(ChatConversationsToggle, label);
+    }
+
+    private void ChatConversationsToggle_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var collapsed = !chatConversationsCollapsed;
+            store.SaveChatConversationsCollapsed(collapsed);
+            ApplyChatConversationLayout(collapsed);
+        }
+        catch (Exception ex) { ShowError("保存会话栏显示状态失败", ex); }
+    }
+
     private readonly List<ChatToastWindow> chatToastWindows = [];
     private bool chatRefreshing;
     private bool preparingChatResource;
@@ -87,17 +147,24 @@ public partial class MainWindow
 
     private void ChatMessage_SelectionChanged(object sender, SelectionChangedEventArgs e) { }
 
-    private void ChatInput_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    private void ChatInput_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key != Key.Enter || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) return;
-        e.Handled = true;
-        ChatSend_Click(sender, new RoutedEventArgs());
+        if (HandleChatInputKey(e.Key, Keyboard.Modifiers, e.IsRepeat)) e.Handled = true;
+    }
+
+    internal bool HandleChatInputKey(Key key, ModifierKeys modifiers, bool repeated)
+    {
+        // ImeProcessed and composing Enter belong to the input method. Shift+Enter
+        // remains unhandled so the multiline TextBox inserts its normal newline.
+        if (key != Key.Enter || chatInputComposing || modifiers != ModifierKeys.None) return false;
+        if (!repeated) ChatSend_Click(ChatInput, new RoutedEventArgs());
+        return true;
     }
 
     private async void ChatSend_Click(object sender, RoutedEventArgs e)
     {
         var peerId = SelectedChatPeerId;
-        if (peerId is null) return;
+        if (peerId is null || !ChatSendButton.IsEnabled || chatInputComposing || string.IsNullOrWhiteSpace(ChatInput.Text)) return;
         try
         {
             chat.QueueText(peerId, ChatInput.Text);
@@ -305,7 +372,11 @@ public partial class MainWindow
 
     private async Task PumpChatSafeAsync()
     {
-        try { await chat.PumpAsync(updateCancellation.Token); }
+        try
+        {
+            if (chatPumpOverride is { } pump) await pump();
+            else await chat.PumpAsync(updateCancellation.Token);
+        }
         catch (OperationCanceledException) when (exiting) { }
         catch (Exception ex) { AppLog.Write("聊天队列发送失败", ex); }
     }

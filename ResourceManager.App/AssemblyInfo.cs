@@ -2,6 +2,7 @@ using System.Windows;
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("ResourceManager.SettingsChecks")]
+[assembly: InternalsVisibleTo("ResourceManager.ChatChecks")]
 
 [assembly:ThemeInfo(
     ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located
