@@ -35,9 +35,9 @@ public sealed record EffectiveGroupPermission(string SourceGroupId, GroupAccess 
 public sealed record ResourceGroup(string Id, string Name, string? ParentId, int SortOrder, DateTimeOffset CreatedUtc);
 public sealed record ResourceTreeCatalog(IReadOnlyList<ResourceGroup> Groups, IReadOnlyList<RemoteResource> Resources);
 public sealed record LocalResource(string Id, string Name, ResourceKind Kind, PublishMode Mode, string SourcePath, DateTimeOffset PublishedUtc, string Note = "", string GroupId = NodeStore.DefaultResourceGroupId);
-public sealed record RemoteResource(string Id, string Name, ResourceKind Kind, PublishMode Mode, long Size, DateTimeOffset ModifiedUtc, bool Available, string Note = "", string GroupId = NodeStore.DefaultResourceGroupId);
+public sealed record RemoteResource(string Id, string Name, ResourceKind Kind, PublishMode Mode, long Size, DateTimeOffset ModifiedUtc, bool Available, string Note = "", string GroupId = NodeStore.DefaultResourceGroupId, bool ServerStored = false);
 public sealed record RemoteFile(string RelativePath, long Size, DateTimeOffset ModifiedUtc, bool IsDirectory = false);
-public sealed record Favorite(string PeerId, string ResourceId, string Name, ResourceKind Kind);
+public sealed record Favorite(string PeerId, string ResourceId, string Name, ResourceKind Kind, string? ServerId = null, bool ServerStored = false);
 public sealed record DownloadJob(string Id, string PeerId, string ResourceId, string ResourceName, ResourceKind Kind, string TargetPath, string Status, long DownloadedBytes, long TotalBytes, string? Error);
 public sealed record SharedUpdatePackage(string ResourceId, string Version, long Size, string Sha256, DateTimeOffset ModifiedUtc);
 public sealed record ResourceReminderRequest(string Protocol, string MessageId, string SenderDeviceId, string ResourceId,

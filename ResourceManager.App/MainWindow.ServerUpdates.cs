@@ -18,11 +18,11 @@ public partial class MainWindow
                 if (row.Session is null || !row.SupportsResources) throw new IOException("尚未连接或服务端版本过旧");
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(TimeSpan.FromSeconds(10));
                 var catalogs = await workspaceClient!.CatalogsAsync(row.Binding, row.Session, timeout.Token);
-                return catalogs.Where(c => c.Online && c.Owner != store.GetSettings().Profile.DeviceId).SelectMany(c => c.Updates.Select(package =>
+                return catalogs.SelectMany(c => c.Updates.Where(package => c.Owner != store.GetSettings().Profile.DeviceId || c.Catalog.Resources.Any(r => r.Id == package.ResourceId && r.ServerStored)).Select(package =>
                 {
                     var member = row.Binding.Cached?.Members.FirstOrDefault(m => m.Profile.DeviceId == c.Owner);
                     if (member is null || !ValidUpdatePackage(package)) return null;
-                    return new LocalUpdateCandidate(new(c.Owner, "", 0, member.Profile.Nickname, member.Profile.Avatar, null), package, UpdateClient.ParseVersion(package.Version), row.Binding.Id, row.Name);
+                    return new LocalUpdateCandidate(new(c.Owner, "", 0, member.Profile.Nickname, member.Profile.Avatar, null), package, UpdateClient.ParseVersion(package.Version), row.Binding.Id, row.Name, c.Catalog.Resources.Any(r => r.Id == package.ResourceId && r.ServerStored));
                 })).OfType<LocalUpdateCandidate>().ToArray();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
@@ -41,7 +41,7 @@ public partial class MainWindow
         if (candidate.ServerBindingId is null) return await updateClient.DownloadAsync(candidate.Package, candidate.Peer, client, progress, token);
         var row = Servers.FirstOrDefault(s => s.Binding.Id == candidate.ServerBindingId) ?? throw new IOException("更新来源服务器已移除。");
         if (row.Session is null) throw new IOException("更新来源服务器未连接。");
-        using var transport = new WorkspaceResourceClient(store, workspaceClient!, row.Binding, () => row.Session, candidate.Peer.DeviceId);
+        using var transport = new WorkspaceResourceClient(store, workspaceClient!, row.Binding, () => row.Session, candidate.Peer.DeviceId, serverStored: candidate.ServerStored);
         var path = await updateClient.DownloadAsync(candidate.Package, candidate.Peer, transport, progress, token);
         try { ValidateServerUpdateFile(path, candidate.Version); }
         catch { File.Delete(path); throw; }

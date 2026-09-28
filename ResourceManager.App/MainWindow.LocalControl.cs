@@ -30,6 +30,7 @@ public partial class MainWindow
             servers = Servers.Count,
             connectedServers = Servers.Count(s => s.Status == "在线"),
             activeDownloads = activeDownloads.Count,
+            activeUploads = activeUploads.Count,
             publishedResources = store.GetResources().Count,
             peers = store.GetPeers().Count,
             status = StatusText.Text

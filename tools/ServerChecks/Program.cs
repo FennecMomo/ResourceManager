@@ -89,6 +89,20 @@ internal static class Program
                     var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
                     using var file = File.Create(Path.Combine(Output, $"servers-{size.Item1}.png")); encoder.Save(file);
                 }
+                var uploadJob = new WorkspaceUploadManager(store, client).Create(row.Binding, sharedPath, GroupAccess.Public, []);
+                typeof(MainWindow).GetMethod("StartUpload", Private)!.Invoke(window, [uploadJob.Id]);
+                await Until(() => store.GetUploads().Single(j => j.Id == uploadJob.Id).Status == "已完成");
+                await Until(() => row.Catalogs.Any(c => c.Owner == store.GetSettings().Profile.DeviceId && c.Catalog.Resources.Any(r => r.Id == uploadJob.Id)));
+                row.SelectedMember = row.Members.Single(m => m.DeviceId == store.GetSettings().Profile.DeviceId);
+                var storedNode = row.ResourceTree.SelectMany(n => n.Children).Single(n => n.RemoteRow?.Resource.Id == uploadJob.Id);
+                row.SelectedResource = storedNode; row.Notify();
+                Require(row.CanDownload && row.ResourceDetail.Contains("服务器存储"), "background upload completes and exposes stored-resource details");
+                typeof(MainWindow).GetMethod("ServerFavorite_Click", Private)!.Invoke(window, [new Button { DataContext = row }, new RoutedEventArgs()]);
+                Require(window.Favorites.Any(f => f.Favorite.ServerId == row.Binding.ServerId && f.Favorite.ServerStored && f.Status == "可下载"), "server favorite records server identity and storage mode in favorites page");
+                Require(window.Uploads.Any(u => u.Id == uploadJob.Id && u.Text.Contains("已完成")), "persistent upload task exposes completion and byte progress");
+                var permissionDialog = new StoredPermissionDialog(row.Binding.Cached!.Members, new(GroupAccess.Private, []));
+                Require(permissionDialog.Permission.Access == GroupAccess.Private && !permissionDialog.IsVisible, "stored permission editor preserves private selection without opening a window"); permissionDialog.Close();
+                Require(row.VersionDetail.Contains("0.3.0") && row.VersionDetail.Contains("0.6.4"), "server and client versions are independently displayed");
                 typeof(MainWindow).GetField("editingServer", Private)!.SetValue(window, true);
                 var control = await window.HandleLocalControlAsync(new(1, "shutdown", Environment.ProcessId), default);
                 Require(!control.Success && control.Error == "editing_server", "background shutdown protects server editor");
@@ -129,7 +143,7 @@ internal static class Program
         public static async Task<Host> Start(string path, string address = "http://127.0.0.1:0")
         {
             var builder = WebApplication.CreateBuilder(); builder.Logging.ClearProviders(); builder.WebHost.UseUrls(address);
-            builder.Services.AddSingleton(new ServerStore(path, "Test")); builder.Services.AddSingleton(new ServerRuntimeOptions(path, "Test", 1, 2, 3, "0.1.0"));
+            builder.Services.AddSingleton(new ServerStore(path, "Test")); builder.Services.AddSingleton(new ServerRuntimeOptions(path, "Test", 1, 2, 3, "0.3.0"));
             builder.Services.AddSingleton<WorkspaceHub>(); builder.Services.AddHostedService(s => s.GetRequiredService<WorkspaceHub>());
             var app = builder.Build(); app.MapWorkspace(); await app.StartAsync(); return new(app);
         }

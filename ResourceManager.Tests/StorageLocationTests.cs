@@ -28,7 +28,9 @@ public sealed class StorageLocationTests
             new("cursor", [new(new(peer.DeviceId, peer.Nickname, null, "0.6.1"), true, DateTimeOffset.UtcNow)]));
         store.SaveServerBinding(server);
         store.SetServerPublication(server.Id, "group", group.Id, true);
-        store.SaveServerDownload("job", server.Id, peer.Nickname);
+        store.SaveServerDownload("job", server.Id, peer.Nickname, true);
+        store.SaveUpload(new("upload", server.Id, copy.SourcePath, new("s-" + Guid.NewGuid().ToString("N"), copy.Name, copy.Kind, GroupAccess.Public, []), "已暂停"));
+        store.SaveServerFavorite(new(peer.DeviceId, copy.Id, copy.Name, copy.Kind, server.ServerId, true));
         store.TrustDeviceKey(peer.DeviceId, "migration-trust-fixture");
         store.SaveFavorite(new Favorite(peer.DeviceId, copy.Id, copy.Name, copy.Kind));
         var downloadTarget = space.Write("downloads/file.rm-part", "partial");
@@ -72,6 +74,9 @@ public sealed class StorageLocationTests
         Assert.Equal(server.PublicKey, migratedServer.PublicKey);
         Assert.True(migrated.IsServerPublished(server.Id, "resource", copy.Id));
         Assert.Equal(server.Id, migrated.GetServerDownload("job")!.Value.Server);
+        Assert.True(migrated.GetServerDownload("job")!.Value.Stored);
+        Assert.Equal(migratedCopy.SourcePath, Assert.Single(migrated.GetUploads()).SourcePath);
+        Assert.Equal(store.GetServerFavorites(), migrated.GetServerFavorites());
         Assert.Equal(peer.DeviceId, Assert.Single(migratedServer.Cached!.Members).Profile.DeviceId);
         Assert.Equal("migration-trust-fixture", migrated.GetTrustedDeviceKey(peer.DeviceId));
         Assert.True(migrated.CanAccessGroup(childGroup.Id, peer.DeviceId));

@@ -27,6 +27,8 @@ public sealed partial class NodeStore
         using var command = db.CreateCommand();
         command.CommandText = """
             PRAGMA journal_mode=WAL;
+            CREATE TABLE IF NOT EXISTS server_uploads(id TEXT PRIMARY KEY,json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS server_favorites(server TEXT NOT NULL,owner TEXT NOT NULL,resource TEXT NOT NULL,mode INTEGER NOT NULL,json TEXT NOT NULL,PRIMARY KEY(server,owner,resource,mode));
             CREATE TABLE IF NOT EXISTS server_bindings(id TEXT PRIMARY KEY,json TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS server_publications(server TEXT NOT NULL,kind TEXT NOT NULL,id TEXT NOT NULL,enabled INTEGER NOT NULL,PRIMARY KEY(server,kind,id));
             CREATE TABLE IF NOT EXISTS server_downloads(job TEXT PRIMARY KEY,server TEXT NOT NULL,owner_name TEXT NOT NULL);
@@ -62,6 +64,7 @@ public sealed partial class NodeStore
             CREATE INDEX IF NOT EXISTS ix_chat_timeline ON chat_messages(peer_id,seq);
             """;
         command.ExecuteNonQuery();
+        EnsureColumn(db, "server_downloads", "stored", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(db, "resources", "note", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(db, "resources", "group_id", "TEXT NOT NULL DEFAULT 'default'");
         using (var groups = Cmd(db, """

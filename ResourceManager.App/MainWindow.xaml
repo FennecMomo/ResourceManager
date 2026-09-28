@@ -864,6 +864,8 @@
                 <TabItem Header="服务器">
                     <Grid Margin="28,23,28,22"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <WrapPanel Margin="0,0,0,16">
+                            <Button Content="上传…" Click="UploadMenu_Click" Margin="0,0,8,8"/>
+                            <Button Content="上传任务" Click="UploadTasks_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
                             <Button Content="添加服务器" Click="AddServer_Click" Margin="0,0,8,8"/>
                             <Button Content="编辑" Click="EditServer_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
                             <Button Content="重新连接" Click="ReconnectServer_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
@@ -882,7 +884,7 @@
                                 </Style></TabControl.ItemContainerStyle>
                                 <TabControl.ContentTemplate><DataTemplate>
                                     <Border Style="{StaticResource Card}" Margin="0,12,0,0"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                                        <StackPanel><TextBlock Text="{Binding Name}" Style="{StaticResource CardHeading}"/><TextBlock Text="{Binding Address}" Style="{StaticResource Caption}" Margin="0,5,0,0"/></StackPanel>
+                                        <StackPanel><TextBlock Text="{Binding Name}" Style="{StaticResource CardHeading}"/><TextBlock Text="{Binding Address}" Style="{StaticResource Caption}" Margin="0,5,0,0"/><TextBlock Text="{Binding VersionDetail}" Style="{StaticResource Caption}" Margin="0,5,0,0"/></StackPanel>
                                         <TextBlock Grid.Row="1" Text="{Binding Detail}" TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,10,0,14"/>
                                         <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                             <ListBox ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember, Mode=TwoWay}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -894,7 +896,7 @@
                                                     <TreeView.ItemTemplate><HierarchicalDataTemplate ItemsSource="{Binding Children}"><StackPanel Orientation="Horizontal"><Path Data="{Binding IconGeometry}" Fill="{Binding IconFill}" Stroke="{Binding IconStroke}" Width="16" Height="16" Stretch="Uniform" Margin="0,0,8,0"/><TextBlock Text="{Binding Name}" TextWrapping="Wrap"/></StackPanel></HierarchicalDataTemplate></TreeView.ItemTemplate>
                                                 </TreeView>
                                                 <TextBlock Grid.Row="1" Text="{Binding ResourceDetail}" TextWrapping="Wrap" Margin="0,12,0,12"/>
-                                                <Button Grid.Row="2" Content="下载选中资源" Click="ServerDownload_Click" IsEnabled="{Binding CanDownload}" HorizontalAlignment="Right"/>
+                                                <WrapPanel Grid.Row="2" HorizontalAlignment="Right"><Button Content="收藏" Click="ServerFavorite_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6"/><Button Content="权限" Click="StoredPermissions_Click" IsEnabled="{Binding CanManageStored}" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6"/><Button Content="删除上传" Click="DeleteStored_Click" IsEnabled="{Binding CanManageStored}" Style="{StaticResource DangerButton}" Margin="0,0,8,6"/><Button Content="下载" Click="ServerDownload_Click" IsEnabled="{Binding CanDownload}" Margin="0,0,0,6"/></WrapPanel>
                                             </Grid>
                                         </Grid>
                                     </Grid></Border>

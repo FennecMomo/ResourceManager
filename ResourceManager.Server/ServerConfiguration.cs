@@ -29,14 +29,14 @@ public static class ServerConfiguration
         else if (cli.ContainsKey("config") || Environment.GetEnvironmentVariable("RM_CONFIG") is not null) throw new ArgumentException("指定配置文件不存在。");
         string Value(string key, string fallback) => cli.GetValueOrDefault(key) ?? Environment.GetEnvironmentVariable("RM_" + key.Replace('-', '_').ToUpperInvariant()) ?? config.GetValueOrDefault(key) ?? fallback;
         int Number(string key, int fallback, int max = 65535) => int.TryParse(Value(key, fallback.ToString()), out var value) && value >= 1 && value <= max ? value : throw new ArgumentException("配置数值无效：" + key);
-        long Bytes(string key, long fallback) => long.TryParse(Value(key, fallback.ToString()), out var value) && value > 0 ? value : throw new ArgumentException("容量配置无效：" + key);
+        long Bytes(string key, long fallback) => long.TryParse(Value(key, fallback.ToString()), out var value) && value >= 0 ? value : throw new ArgumentException("容量配置无效：" + key);
         var data = Path.GetFullPath(Value("data-dir", OperatingSystem.IsWindows() ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ResourceManager.Server") : "/var/lib/resourcemanager"));
         var name = Value("server-name", Environment.MachineName).Trim(); if (name.Length is < 1 or > 80) throw new ArgumentException("服务器名称须为 1–80 个字符。");
         var address = Value("api-address", "0.0.0.0"); if (!IPAddress.TryParse(address, out _)) throw new ArgumentException("api-address 须为监听 IP。");
         if (!bool.TryParse(Value("discovery-enabled", "true"), out var discovery)) throw new ArgumentException("discovery-enabled 须为 true 或 false。");
         var result = new ServerRuntimeOptions(data, name, Number("api-port", ResourceManager.Core.FeedbackRules.DefaultApiPort), Number("discovery-port", ResourceManager.Core.FeedbackRules.DefaultDiscoveryPort), Number("admin-port", 37646), version,
-            address, Number("max-devices", 256, 1000), discovery, Path.GetFullPath(Value("upload-dir", Path.Combine(data, "uploads"))), Bytes("max-capacity-bytes", 100L * 1024 * 1024 * 1024), Bytes("max-file-bytes", 1024L * 1024 * 1024));
-        if (result.ApiPort == result.AdminPort || result.MaxFileBytes > result.MaxCapacityBytes) throw new ArgumentException("API 与管理端口不能相同，单文件限制不能超过总容量。");
+            address, Number("max-devices", 256, 1000), discovery, Path.GetFullPath(Value("upload-dir", Path.Combine(data, "uploads"))), Bytes("max-capacity-bytes", 0), Bytes("max-file-bytes", 0));
+        if (result.ApiPort == result.AdminPort) throw new ArgumentException("API 与管理端口不能相同。");
         return result;
     }
     public static int RunCommand(string command, ServerRuntimeOptions options)
@@ -45,9 +45,12 @@ public static class ServerConfiguration
         {
             if (command == "doctor")
             {
-                Directory.CreateDirectory(options.DataDirectory);
-                var probe = Path.Combine(options.DataDirectory, ".doctor-" + Guid.NewGuid().ToString("N"));
-                try { File.WriteAllText(probe, "probe"); } finally { if (File.Exists(probe)) File.Delete(probe); }
+                foreach (var directory in new[] { options.DataDirectory, options.UploadDirectory ?? Path.Combine(options.DataDirectory, "uploads") })
+                {
+                    Directory.CreateDirectory(directory);
+                    var probe = Path.Combine(directory, ".doctor-" + Guid.NewGuid().ToString("N"));
+                    try { File.WriteAllText(probe, "probe"); } finally { if (File.Exists(probe)) File.Delete(probe); }
+                }
             }
             if (command == "migrate") { var store = new ServerStore(options.DataDirectory, options.ServerName); using var hub = new WorkspaceHub(store, options); }
             Console.WriteLine(JsonSerializer.Serialize(new { ok = true, command, code = "OK", dataDirectory = options.DataDirectory, options.ApiPort, options.AdminPort, options.Version })); return 0;

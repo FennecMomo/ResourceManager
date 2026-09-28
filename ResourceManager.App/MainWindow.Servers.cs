@@ -19,8 +19,9 @@ public partial class MainWindow
     private bool changingServer;
     private void InitializeServers()
     {
+        RefreshUploads();
         workspaceClient = new WorkspaceClient(store, AppVersion);
-        foreach (var binding in store.GetServerBindings()) Servers.Add(new(binding));
+        foreach (var binding in store.GetServerBindings()) Servers.Add(new(binding, store.GetSettings().Profile.DeviceId));
     }
     private void StartServers() { foreach (var row in Servers) StartServer(row); }
     private void StartServer(ServerTabRow row)
@@ -43,7 +44,10 @@ public partial class MainWindow
                         await StopPublicationAsync(row);
                         row.Update("连接中", null);
                         row.Session = await workspaceClient!.JoinAsync(row.Binding, token); profile = currentProfile; cursor = "";
-                        row.SupportsResources = (await workspaceClient.InspectAsync(row.Address, token)).Features?.Contains("published-resources-v1") == true;
+                        var capabilities = await workspaceClient.InspectAsync(row.Address, token);
+                        row.ServerVersion = capabilities.Version;
+                        row.SupportsResources = capabilities.Features?.Contains("published-resources-v1") == true;
+                        row.SupportsStorage = capabilities.Features?.Contains("stored-resources-v1") == true;
                     }
                     var snapshot = await workspaceClient!.WatchAsync(row.Binding, row.Session, cursor, token);
                     token.ThrowIfCancellationRequested();
@@ -54,6 +58,7 @@ public partial class MainWindow
                     if (row.SupportsResources)
                     {
                         row.SetCatalogs(await workspaceClient!.CatalogsAsync(row.Binding, row.Session, token));
+                        RefreshFavoritesView();
                         if (row.PublicationWorker is null)
                         {
                             row.PublicationCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -126,7 +131,7 @@ public partial class MainWindow
             if (row is not null) await StopServerAsync(row);
             store.SaveServerBinding(binding);
             if (row is not null) Servers.Remove(row);
-            var replacement = new ServerTabRow(binding); Servers.Add(replacement); ServerTabs.SelectedItem = replacement; StartServer(replacement);
+            var replacement = new ServerTabRow(binding, store.GetSettings().Profile.DeviceId); Servers.Add(replacement); ServerTabs.SelectedItem = replacement; StartServer(replacement);
         }) { Owner = this, Icon = Icon };
         editingServer = true;
         try { dialog.ShowDialog(); } finally { editingServer = false; }
@@ -154,8 +159,11 @@ public partial class MainWindow
         public string Address => Binding.Address;
         public string Status => Binding.Status;
         public string Header => Name + " · " + Status;
+        public string VersionDetail => $"服务端 {ServerVersion ?? "待连接"} · 客户端 {AppVersion}";
         public string Detail => Binding.Error ?? SyncError ?? (Status == "在线" ? $"{Members.Count(m => m.State == "在线")} 台设备在线 · {Members.Count} 台已登记" + (SupportsResources ? "" : " · 资源功能需要服务端 0.2.0") : "保留上次名单，等待服务器连接。");
         internal bool SupportsResources;
+        internal bool SupportsStorage;
+        internal string? ServerVersion;
         internal string? SyncError;
         internal CancellationTokenSource? PublicationCancellation;
         internal Task? PublicationWorker;
@@ -164,8 +172,10 @@ public partial class MainWindow
         private ServerMemberRow? selectedMember;
         public ServerMemberRow? SelectedMember { get => selectedMember; set { selectedMember = value; RebuildResources(); Notify(); } }
         internal ResourceTreeNode? SelectedResource;
-        public bool CanDownload => Status == "在线" && SelectedMember?.State == "在线" && SelectedResource?.RemoteRow?.Status == "可下载";
-        public string ResourceDetail => SelectedResource?.RemoteRow is { } row ? $"{row.Name}\n{row.Kind} · {row.Size} · {row.Status}\n{row.Note}" : "选择左侧设备，再选择资源查看详情。";
+        private readonly string? ownDeviceId;
+        public bool CanManageStored => Status == "在线" && SelectedMember?.DeviceId == ownDeviceId && SelectedResource?.RemoteRow?.Resource.ServerStored == true;
+        public bool CanDownload => Status == "在线" && SelectedResource?.RemoteRow?.Status == "可下载";
+        public string ResourceDetail => SelectedResource?.RemoteRow is { } row ? $"{row.Name}\n{row.Kind} · {row.Size} · {(row.Resource.ServerStored ? "服务器存储" : "本机发布")} · {row.Status}\n{row.Note}" : "选择左侧设备，再选择资源查看详情。";
         internal void SetCatalogs(WorkspaceOwnerCatalog[] catalogs) { Catalogs = catalogs; Update(Status, Binding.Error); }
         private void RebuildResources()
         {
@@ -175,7 +185,7 @@ public partial class MainWindow
             var groups = BuildGroupTree(data.Catalog.Groups, ResourceTree, false);
             foreach (var item in data.Catalog.Resources)
             {
-                var row = new ResourceRow(item, item.Name, KindText(item.Kind), ModeText(item.Mode), SizeText(item.Size), Status != "在线" ? "服务器离线" : !data.Online ? "发布者离线" : item.Available ? "可下载" : "原文件不可用", item.Note);
+                var row = new ResourceRow(item, item.Name, KindText(item.Kind), ModeText(item.Mode), SizeText(item.Size), Status != "在线" ? "服务器离线" : !data.Online && !item.ServerStored ? "发布者离线" : item.Available ? "可下载" : "原文件不可用", item.Note);
                 var node = new ResourceTreeNode { Key = item.Id, Name = item.Name, GroupId = item.GroupId, RemoteRow = row, IsFolder = item.Kind == ResourceKind.Folder, IsSelected = selected == item.Id };
                 if (groups.TryGetValue(item.GroupId, out var parent)) parent.Children.Add(node); else ResourceTree.Add(node);
                 if (node.IsSelected) SelectedResource = node;
@@ -185,7 +195,7 @@ public partial class MainWindow
         internal CancellationTokenSource? Cancellation;
         internal Task? Worker;
         internal WorkspaceSession? Session;
-        public ServerTabRow(ServerBinding binding) { Binding = binding; Update("待连接", null); }
+        public ServerTabRow(ServerBinding binding, string? ownDeviceId = null) { this.ownDeviceId = ownDeviceId; Binding = binding; Update("待连接", null); }
         internal void Update(string status, string? error, WorkspaceSnapshot? snapshot = null)
         {
             Binding = Binding with { Status = status, Error = error, Cached = snapshot ?? Binding.Cached };

@@ -137,6 +137,111 @@ public sealed class WorkspaceResourceTests
         Assert.Equal("已完成", (await manager.RunAsync(job.Id)).Status);
     }
 
+    [Fact]
+    public async Task StoredFolderSurvivesOwnerOfflineAndResumesWithPermissionsAndDeletion()
+    {
+        await using var f = await Fixture.Start();
+        var folder = Path.Combine(f.Root, "upload-folder"); Directory.CreateDirectory(Path.Combine(folder, "empty")); Directory.CreateDirectory(Path.Combine(folder, "nested"));
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(700000); await File.WriteAllBytesAsync(Path.Combine(folder, "nested", "data.bin"), bytes);
+        var manager = new WorkspaceUploadManager(f.Owner, f.ClientA); var job = manager.Create(f.BindingA, folder, GroupAccess.Public, []);
+        await manager.RunAsync(job.Id, f.BindingA, () => f.SessionA, null, default);
+        Assert.Equal("已完成", f.Owner.GetUploads().Single().Status);
+        await f.ClientA.LeaveAsync(f.BindingA, f.SessionA, default);
+        var catalog = (await f.ClientB.CatalogsAsync(f.BindingB, f.SessionB, default)).Single(c => c.Owner == f.Peer.DeviceId);
+        Assert.False(catalog.Online); var resource = Assert.Single(catalog.Catalog.Resources); Assert.True(resource.ServerStored);
+        using var transport = new WorkspaceResourceClient(f.Reader, f.ClientB, f.BindingB, () => f.SessionB, f.Peer.DeviceId, _ => throw new Exception("Storage must not discover LAN"), true);
+        var downloader = new DownloadManager(f.Reader, transport, _ => f.Peer); var download = downloader.CreateJob(f.Peer, resource, Path.Combine(f.Root, "stored-download"));
+        var target = Path.Combine(download.TargetPath, "nested", "data.bin"); Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        var metadata = await transport.GetFileMetadataAsync(f.Peer, job.Id, "nested/data.bin", default);
+        await File.WriteAllBytesAsync(target + ".rm-part", bytes[..123456]); await File.WriteAllTextAsync(target + ".rm-etag", metadata!.Etag);
+        await downloader.RunAsync(download.Id); Assert.Equal(bytes, await File.ReadAllBytesAsync(target)); Assert.True(Directory.Exists(Path.Combine(download.TargetPath, "empty"))); Assert.Equal("服务器存储", transport.RouteName);
+        f.SessionA = await f.ClientA.JoinAsync(f.BindingA);
+        await f.ClientA.StoredPermissionAsync(f.BindingA, f.SessionA, job.Id, new(GroupAccess.Private, []), default);
+        Assert.Empty((await f.ClientB.CatalogsAsync(f.BindingB, f.SessionB, default)).Single(c => c.Owner == f.Peer.DeviceId).Catalog.Resources);
+        await Assert.ThrowsAsync<HttpRequestException>(() => transport.GetFilesAsync(f.Peer, job.Id));
+        await f.ClientA.StoredPermissionAsync(f.BindingA, f.SessionA, job.Id, new(GroupAccess.AllowList, [f.Reader.GetSettings().Profile.DeviceId]), default);
+        Assert.NotEmpty(await transport.GetFilesAsync(f.Peer, job.Id));
+        var denied = await Assert.ThrowsAsync<WorkspaceException>(() => f.ClientB.DeleteStoredAsync(f.BindingB, f.SessionB, job.Id, default)); Assert.Equal(HttpStatusCode.Forbidden, denied.Code);
+        await f.ClientA.DeleteStoredAsync(f.BindingA, f.SessionA, job.Id, default);
+        await Assert.ThrowsAsync<WorkspaceException>(() => transport.GetFilesAsync(f.Peer, job.Id));
+        Assert.True(File.Exists(Path.Combine(folder, "nested", "data.bin")));
+    }
+
+    [Fact]
+    public async Task StoredUploadRejectsIncompleteHashMismatchPathsAndCanResume()
+    {
+        await using var f = await Fixture.Start(); var id = "s-" + Guid.NewGuid().ToString("N"); var data = System.Text.Encoding.UTF8.GetBytes("correct content");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data));
+        var spec = new StoredResourceSpec(id, "test.txt", ResourceKind.File, GroupAccess.Public, []);
+        await f.ClientA.BeginUploadAsync(f.BindingA, f.SessionA, spec, default);
+        await Assert.ThrowsAsync<WorkspaceException>(() => f.ClientA.DeclareEntryAsync(f.BindingA, f.SessionA, id, new("../escape", 1, hash, false, DateTimeOffset.UtcNow), default));
+        var entry = new StoredEntry("test.txt", data.Length, hash, false, DateTimeOffset.UtcNow);
+        await f.ClientA.DeclareEntryAsync(f.BindingA, f.SessionA, id, entry, default);
+        await Assert.ThrowsAsync<WorkspaceException>(() => f.ClientA.CompleteUploadAsync(f.BindingA, f.SessionA, id, 1, default));
+        await f.ClientA.UploadChunkAsync(f.BindingA, f.SessionA, id, entry.Path, 0, new byte[data.Length], default);
+        await Assert.ThrowsAsync<WorkspaceException>(() => f.ClientA.CompleteEntryAsync(f.BindingA, f.SessionA, id, entry.Path, default));
+        Assert.Equal(0, (await f.ClientA.DeclareEntryAsync(f.BindingA, f.SessionA, id, entry, default)).Offset);
+        await f.ClientA.UploadChunkAsync(f.BindingA, f.SessionA, id, entry.Path, 0, data[..4], default);
+        Assert.Equal(4, (await f.ClientA.DeclareEntryAsync(f.BindingA, f.SessionA, id, entry, default)).Offset);
+        await f.ClientA.UploadChunkAsync(f.BindingA, f.SessionA, id, entry.Path, 4, data[4..], default);
+        await f.ClientA.CompleteEntryAsync(f.BindingA, f.SessionA, id, entry.Path, default);
+        // Simulate a crash after the atomic directory rename but before the database publication.
+        var uploadRoot = Path.Combine(f.Root, "server", "uploads"); Directory.CreateDirectory(Path.Combine(uploadRoot, "ready"));
+        Directory.Move(Path.Combine(uploadRoot, "pending", id), Path.Combine(uploadRoot, "ready", id));
+        Assert.True((await f.ClientA.BeginUploadAsync(f.BindingA, f.SessionA, spec, default)).Complete);
+        Assert.Single((await f.ClientB.CatalogsAsync(f.BindingB, f.SessionB, default)).Single(c => c.Owner == f.Peer.DeviceId).Catalog.Resources);
+        Assert.True((await f.ClientA.GetStoredStateAsync(f.BindingA, f.SessionA, id, default)).Complete);
+    }
+
+    [Fact]
+    public async Task StoredCatalogPersistsRestartAndUploadedUpdateSurvivesOwnerOffline()
+    {
+        await using var f = await Fixture.Start(); var id = "s-" + Guid.NewGuid().ToString("N"); var bytes = new byte[] { 77, 90, 1, 2 }; var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+        var spec = new StoredResourceSpec(id, "ResourceManager.exe", ResourceKind.File, GroupAccess.Public, [], Update: new(id, "9.0.0", bytes.Length, hash, DateTimeOffset.UtcNow));
+        await f.ClientA.BeginUploadAsync(f.BindingA, f.SessionA, spec, default);
+        await f.ClientA.DeclareEntryAsync(f.BindingA, f.SessionA, id, new(spec.Name, bytes.Length, hash, false, DateTimeOffset.UtcNow), default);
+        await f.ClientA.UploadChunkAsync(f.BindingA, f.SessionA, id, spec.Name, 0, bytes, default); await f.ClientA.CompleteEntryAsync(f.BindingA, f.SessionA, id, spec.Name, default); await f.ClientA.CompleteUploadAsync(f.BindingA, f.SessionA, id, 1, default);
+        await f.ClientA.LeaveAsync(f.BindingA, f.SessionA, default);
+        var catalog = (await f.ClientB.CatalogsAsync(f.BindingB, f.SessionB, default)).Single(c => c.Owner == f.Peer.DeviceId); Assert.False(catalog.Online); Assert.Single(catalog.Updates);
+        await f.StopRelay();
+        var data = Path.Combine(f.Root, "server"); using var restarted = new WorkspaceHub(new ServerStore(data, "Resources"), new(data, "Resources", 1, 2, 3, "0.3.0"));
+        Assert.Contains(restarted.ReadAudit(), a => System.Text.Json.JsonSerializer.Serialize(a).Contains("upload.commit"));
+        Assert.Single(restarted.Catalogs(f.SessionB.Token, f.Reader.GetSettings().Profile.DeviceId).Single(c => c.Owner == f.Peer.DeviceId).Updates);
+    }
+
+    private sealed class UploadProgress(Action<UploadJob> report) : IProgress<UploadJob> { public void Report(UploadJob job) => report(job); }
+    [Fact]
+    public async Task PausedUploadResumesFromPersistedTaskAndAdminEndpointsStayPrivate()
+    {
+        await using var f = await Fixture.Start();
+        var file = Path.Combine(f.Root, "resume.bin"); await File.WriteAllBytesAsync(file, new byte[2 * 1024 * 1024]);
+        var manager = new WorkspaceUploadManager(f.Owner, f.ClientA); var job = manager.Create(f.BindingA, file, GroupAccess.Public, []);
+        using var cancellation = new CancellationTokenSource();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.RunAsync(job.Id, f.BindingA, () => f.SessionA, new UploadProgress(j => { if (j.Sent > 0) cancellation.Cancel(); }), cancellation.Token));
+        var reopened = new NodeStore(f.Owner.DataDirectory); Assert.Equal("已暂停", reopened.GetUploads().Single().Status);
+        Assert.Empty((await f.ClientB.CatalogsAsync(f.BindingB, f.SessionB, default)).Single(c => c.Owner == f.Peer.DeviceId).Catalog.Resources);
+        await new WorkspaceUploadManager(reopened, f.ClientA).RunAsync(job.Id, f.BindingA, () => f.SessionA, null, default);
+        Assert.Equal("已完成", reopened.GetUploads().Single().Status);
+        using var http = new HttpClient();
+        Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync(f.BindingA.Address + "/admin/api/workspace/audit")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await http.DeleteAsync(f.BindingA.Address + "/admin/api/workspace/resources/" + job.Id)).StatusCode);
+    }
+
+    [Fact]
+    public void ServerFavoritesAndTransferModesPersistWithoutCrossServerCollision()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "RM-stored-state-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new NodeStore(root); var favorite = new Favorite("owner", "resource", "name", ResourceKind.File, "server-a", true);
+            store.SaveServerFavorite(favorite); store.SaveServerFavorite(favorite with { ServerId = "server-b" }); store.SaveServerFavorite(favorite with { ServerStored = false });
+            store.SaveServerDownload("job", "binding", "Owner", true);
+            store = new NodeStore(root); Assert.Equal(3, store.GetServerFavorites().Count); Assert.True(store.GetServerDownload("job")!.Value.Stored);
+            store.RemoveServerFavorite(favorite); Assert.Equal(2, store.GetServerFavorites().Count);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public string Root { get; } = Path.Combine(Path.GetTempPath(), "RM-resource-tests-" + Guid.NewGuid().ToString("N"));

@@ -25,6 +25,8 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     Args = args,
     ContentRootPath = AppContext.BaseDirectory
 });
+builder.Logging.ClearProviders();
+builder.Logging.AddJsonConsole();
 builder.WebHost.ConfigureKestrel(server =>
 {
     server.Listen(IPAddress.Parse(options.ApiAddress), options.ApiPort);
@@ -35,7 +37,10 @@ builder.Services.Configure<FormOptions>(form => form.MultipartBodyLengthLimit = 
 var protection = builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(options.DataDirectory, "secrets")));
 if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
 builder.Services.AddSingleton(options);
-builder.Services.AddSingleton(new ServerStore(options.DataDirectory, options.ServerName));
+ServerStore serverStore;
+try { serverStore = new ServerStore(options.DataDirectory, options.ServerName); }
+catch (Exception ex) { Console.Error.WriteLine(JsonSerializer.Serialize(new { ok = false, code = "SERVER_STORAGE_INIT_FAILED", error = ex.GetType().Name })); Environment.ExitCode = 3; return; }
+builder.Services.AddSingleton(serverStore);
 builder.Services.AddSingleton<SubmissionLimiter>();
 builder.Services.AddSingleton<GitHubFeedbackClient>();
 builder.Services.AddSingleton<GitHubSessionManager>();
@@ -227,7 +232,9 @@ app.MapPatch("/admin/api/github/issues/{number:int}/state", async (int number, G
     await TryAsync(async () => Results.Ok(await github.SetStateAsync(number, payload.State, payload.StateReason, token))));
 
 app.MapWorkspace();
-app.Run();
+app.Lifetime.ApplicationStarted.Register(() => app.Logger.LogInformation("Code={Code} Version={Version}", "SERVER_READY", options.Version));
+try { app.Run(); }
+catch (Exception ex) { Console.Error.WriteLine(JsonSerializer.Serialize(new { ok = false, code = "SERVER_START_OR_RUN_FAILED", error = ex.GetType().Name })); Environment.ExitCode = 3; }
 
 static string? ClientId(HttpContext context)
 {

@@ -438,7 +438,8 @@ public partial class MainWindow : Window
             };
             Favorites.Add(new FavoriteRow(item, item.Name, peer?.Nickname ?? "未知设备", KindText(item.Kind), status, remote?.Note ?? ""));
         }
-        FavoritesGrid.SelectedItem = Favorites.FirstOrDefault(f => f.Favorite.PeerId == selected?.PeerId && f.Favorite.ResourceId == selected?.ResourceId);
+        AppendServerFavorites();
+        FavoritesGrid.SelectedItem = Favorites.FirstOrDefault(f => f.Favorite == selected);
         UpdateActions();
     }
 
@@ -1001,7 +1002,8 @@ public partial class MainWindow : Window
     private void RemoveFavorite_Click(object sender, RoutedEventArgs e)
     {
         if (FavoritesGrid.SelectedItem is not FavoriteRow row) return;
-        store.RemoveFavorite(row.Favorite.PeerId, row.Favorite.ResourceId);
+        if (row.Favorite.ServerId is not null) store.RemoveServerFavorite(row.Favorite);
+        else store.RemoveFavorite(row.Favorite.PeerId, row.Favorite.ResourceId);
         RefreshFavoritesView();
     }
 
@@ -1016,6 +1018,7 @@ public partial class MainWindow : Window
     {
         if (FavoritesGrid.SelectedItem is not FavoriteRow row) return;
         if (row.Status != "可下载") { SetStatus("该收藏当前不可下载。"); return; }
+        if (row.Favorite.ServerId is not null) { DownloadServerFavorite(row.Favorite); return; }
         var peer = store.GetPeer(row.Favorite.PeerId);
         var resource = peerCatalogs.GetValueOrDefault(row.Favorite.PeerId)?.FirstOrDefault(r => r.Id == row.Favorite.ResourceId);
         if (peer is not null && resource is not null) BeginDownload(peer, resource);
@@ -1905,6 +1908,7 @@ public partial class MainWindow : Window
         exiting = true;
         updateCancellation.Cancel();
         downloadCancellation.Cancel();
+        await StopUploadsAsync();
         await StopServersAsync();
         localDetailsCancellation?.Cancel();
         localDetailsCancellation?.Dispose();
@@ -1993,7 +1997,7 @@ public partial class MainWindow : Window
 }
 
 internal sealed record StagedUpdate(string PackagePath, string Sha256, string Version);
-internal sealed record LocalUpdateCandidate(PeerInfo Peer, SharedUpdatePackage Package, Version Version, string? ServerBindingId = null, string? ServerName = null)
+internal sealed record LocalUpdateCandidate(PeerInfo Peer, SharedUpdatePackage Package, Version Version, string? ServerBindingId = null, string? ServerName = null, bool ServerStored = false)
 {
     public string SourceName => ServerBindingId is null ? $"“{Peer.Nickname}”的本地源" : $"服务器“{ServerName}” / {Peer.Nickname}";
 }

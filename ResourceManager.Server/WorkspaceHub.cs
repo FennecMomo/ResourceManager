@@ -27,6 +27,9 @@ public sealed partial class WorkspaceHub : BackgroundService
             CREATE TABLE IF NOT EXISTS members(id TEXT PRIMARY KEY,public_key TEXT NOT NULL,profile TEXT NOT NULL,token_hash TEXT NOT NULL,expires INTEGER NOT NULL,seen INTEGER NOT NULL,online INTEGER NOT NULL,blocked INTEGER NOT NULL DEFAULT 0);
             CREATE UNIQUE INDEX IF NOT EXISTS member_tokens ON members(token_hash) WHERE token_hash!='';
             CREATE TABLE IF NOT EXISTS nonces(value TEXT PRIMARY KEY,time INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS stored_resources(id TEXT PRIMARY KEY,owner TEXT NOT NULL,json TEXT NOT NULL,complete INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS stored_entries(resource TEXT NOT NULL,path TEXT NOT NULL COLLATE NOCASE,json TEXT NOT NULL,complete INTEGER NOT NULL,PRIMARY KEY(resource,path));
+            CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,time TEXT NOT NULL,action TEXT NOT NULL,device TEXT NOT NULL,resource TEXT NOT NULL,outcome TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS catalogs(owner TEXT PRIMARY KEY,json TEXT NOT NULL);
             UPDATE members SET online=0;
             """; cmd.ExecuteNonQuery();
@@ -34,7 +37,7 @@ public sealed partial class WorkspaceHub : BackgroundService
         signingKey = key is null ? WorkspaceProtocol.CreateKey() : Convert.FromBase64String(key);
         if (key is null) store.SetSetting("workspace_signing_key", Convert.ToBase64String(signingKey));
     }
-    public WorkspaceCapabilities Capabilities => new(WorkspaceProtocol.Protocol, store.ServerId, store.ServerName, options.Version, WorkspaceProtocol.PublicKey(signingKey), ["published-resources-v1"]);
+    public WorkspaceCapabilities Capabilities => new(WorkspaceProtocol.Protocol, store.ServerId, store.ServerName, options.Version, WorkspaceProtocol.PublicKey(signingKey), ["published-resources-v1", "stored-resources-v1"]);
     private SqliteConnection Open() { var db = new SqliteConnection(connectionString); db.Open(); return db; }
     private static SqliteCommand Command(SqliteConnection db, string sql, params object[] args)
     {
@@ -78,7 +81,7 @@ public sealed partial class WorkspaceHub : BackgroundService
                 INSERT INTO members(id,public_key,profile,token_hash,expires,seen,online) VALUES($id,$key,$profile,$token,$expires,$seen,1)
                 ON CONFLICT(id) DO UPDATE SET profile=excluded.profile,token_hash=excluded.token_hash,expires=excluded.expires,seen=excluded.seen,online=1
                 """, "$id", p.DeviceId, "$key", request.PublicKey, "$profile", JsonSerializer.Serialize(profile, WorkspaceProtocol.Json), "$token", Hash(session.Token), "$expires", session.ExpiresUtc.ToUnixTimeSeconds(), "$seen", now.ToUnixTimeSeconds()); save.Transaction = transaction; save.ExecuteNonQuery(); transaction.Commit();
-            Signal(); return session with { Signature = WorkspaceProtocol.Sign(signingKey, WorkspaceProtocol.SessionBytes(session)) };
+            Audit("session.join", p.DeviceId, "", "OK"); Signal(); return session with { Signature = WorkspaceProtocol.Sign(signingKey, WorkspaceProtocol.SessionBytes(session)) };
         }
     }
 
@@ -119,11 +122,11 @@ public sealed partial class WorkspaceHub : BackgroundService
     }
     public void Leave(string token, string device)
     {
-        lock (gate) { Authenticate(token, device, false); using var db = Open(); using var cmd = Command(db, "UPDATE members SET online=0,expires=0 WHERE id=$id", "$id", device); cmd.ExecuteNonQuery(); Signal(); }
+        lock (gate) { Authenticate(token, device, false); using var db = Open(); using var cmd = Command(db, "UPDATE members SET online=0,expires=0 WHERE id=$id", "$id", device); cmd.ExecuteNonQuery(); Audit("session.leave", device, "", "OK"); Signal(); }
     }
     public void SetBlocked(string device, bool blocked)
     {
-        lock (gate) { using var db = Open(); using var cmd = Command(db, "UPDATE members SET blocked=$blocked,online=0,expires=0 WHERE id=$id", "$id", device, "$blocked", blocked ? 1 : 0); if (cmd.ExecuteNonQuery() == 0) throw new KeyNotFoundException("设备不存在。"); Signal(); }
+        lock (gate) { using var db = Open(); using var cmd = Command(db, "UPDATE members SET blocked=$blocked,online=0,expires=0 WHERE id=$id", "$id", device, "$blocked", blocked ? 1 : 0); if (cmd.ExecuteNonQuery() == 0) throw new KeyNotFoundException("设备不存在。"); Audit("device.block", device, "", blocked ? "BLOCKED" : "RESTORED"); Signal(); }
     }
     public object AdminMembers()
     {
@@ -148,9 +151,10 @@ public static partial class WorkspaceEndpoints
     public static void MapWorkspace(this WebApplication app)
     {
         app.MapWorkspaceResources();
+        app.MapWorkspaceStorage();
         app.MapGet("/api/v1/workspace/capabilities", (WorkspaceHub hub) => Results.Ok(hub.Capabilities));
         app.MapPost("/api/v1/workspace/join", (WorkspaceRegistration request, HttpContext context, WorkspaceHub hub) =>
-            Execute(() => Results.Ok(hub.Join(request, context.Connection.RemoteIpAddress?.ToString() ?? "unknown"))));
+            Execute(() => { try { return Results.Ok(hub.Join(request, context.Connection.RemoteIpAddress?.ToString() ?? "unknown")); } catch (WorkspaceException ex) { hub.Audit("session.denied", request.Profile?.DeviceId ?? "", "", ((int)ex.Code).ToString()); throw; } }));
         app.MapGet("/api/v1/workspace/members", async (string? cursor, HttpContext context, WorkspaceHub hub, CancellationToken token) =>
         {
             try { return Results.Ok(await hub.WatchAsync(Token(context), Device(context), cursor, token)); }

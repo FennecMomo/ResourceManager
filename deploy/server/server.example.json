@@ -8,6 +8,6 @@
   "discovery-port": 37645,
   "max-devices": 256,
   "upload-dir": "/var/lib/resourcemanager/uploads",
-  "max-capacity-bytes": 107374182400,
-  "max-file-bytes": 1073741824
+  "max-capacity-bytes": 0,
+  "max-file-bytes": 0
 }

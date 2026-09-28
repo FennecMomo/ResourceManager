@@ -1,6 +1,6 @@
-# ResourceManager.Server 0.2.0
+# ResourceManager.Server 0.3.0
 
-独立的局域网反馈与公网工作空间服务端。保持 `feedback-v1` 兼容，`workspace-v1` 支持自动设备登记、在线名单、资源目录与分片中继；能力 `published-resources-v1` 对应客户端 0.6.2。客户端与服务端独立版本。
+独立的局域网反馈与公网工作空间服务端。保持 `feedback-v1` 兼容，`workspace-v1` 支持自动设备登记、在线名单、资源目录与分片中继；能力 `published-resources-v1` 对应客户端 0.6.2 起的本机发布，`stored-resources-v1` 对应客户端 0.6.4 的持久上传。客户端与服务端独立版本。
 
 公网和 Linux 部署请参阅源码仓库的 [服务器部署说明](https://github.com/FennecMomo/ResourceManager/blob/codex/git-collaboration/docs/server-deployment.md)；发布包附带 `DEPLOYMENT.md` 说明及 `deploy/` 模板。公网仅通过 HTTPS 反向代理暴露 `/api/v1/workspace/*`，下文原有反馈接口仍按可信局域网使用。
 
@@ -64,3 +64,5 @@ Client ID 是公开应用标识，不是写入密钥，也不会授予脱离用�
 
 附件使用白名单、数量和大小限制，服务端只保存并下载，不执行或解压附件。用户关闭反馈时只把状态标记为 `UserClosed`，不会物理删除后端记录。
 客户端每分钟最多提交一条反馈，服务端全局每小时最多接收一百条。客户端随机标识不是授权凭据，只用于区分各自的状态查询和关闭操作；同一局域网内任何人都可以创建新反馈。
+
+0.3.0 增加持久上传与离线下载、权限/删除、审计管理 API。包内 `DEPLOYMENT.md` 提供完整操作说明，`deploy` 包含安装、备份恢复及注销服务脚本。上传不设配额或资源大小上限；独立反馈附件限制保持原规则。

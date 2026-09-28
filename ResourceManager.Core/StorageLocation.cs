@@ -295,6 +295,25 @@ public sealed class StorageLocation(string configurationPath)
             checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE)";
             checkpoint.ExecuteNonQuery();
         }
+        var resourcesFile = Path.Combine(stage, "resources.db");
+        if (File.Exists(resourcesFile))
+        {
+            using var db = OpenDatabase(resourcesFile);
+            using var exists = db.CreateCommand(); exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='server_uploads'";
+            if ((long)exists.ExecuteScalar()! != 0)
+            {
+                using var query = db.CreateCommand(); query.CommandText = "SELECT json FROM server_uploads";
+                var jobs = new List<UploadJob>();
+                using (var reader = query.ExecuteReader()) while (reader.Read()) jobs.Add(System.Text.Json.JsonSerializer.Deserialize<UploadJob>(reader.GetString(0), WorkspaceProtocol.Json)!);
+                foreach (var job in jobs)
+                {
+                    using var update = db.CreateCommand(); update.CommandText = "UPDATE server_uploads SET json=$json WHERE id=$id";
+                    update.Parameters.AddWithValue("$json", System.Text.Json.JsonSerializer.Serialize(job with { SourcePath = Remap(job.SourcePath, source, target) }, WorkspaceProtocol.Json));
+                    update.Parameters.AddWithValue("$id", job.Id); update.ExecuteNonQuery();
+                }
+                using var checkpoint = db.CreateCommand(); checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE)"; checkpoint.ExecuteNonQuery();
+            }
+        }
         var stateFile = Path.Combine(stage, "git-collaboration", "state.json");
         if (File.Exists(stateFile))
         {

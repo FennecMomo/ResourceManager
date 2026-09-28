@@ -46,7 +46,7 @@ public sealed partial class WorkspaceClient
     {
         using var request = Authorized(binding, session, method, path);
         if (body is not null) request.Content = JsonContent.Create(body, options: WorkspaceProtocol.Json);
-        using var response = await (path == "relay" ? resourceHttp : http).SendAsync(request, token).ConfigureAwait(false); await Check(response, token).ConfigureAwait(false);
+        using var response = await (path == "relay" || path.StartsWith("storage") ? resourceHttp : http).SendAsync(request, token).ConfigureAwait(false); await Check(response, token).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<T>(WorkspaceProtocol.Json, token).ConfigureAwait(false) ?? throw new InvalidDataException("资源服务响应为空。");
     }
     public Task<bool> PublishAsync(ServerBinding binding, WorkspaceSession session, WorkspacePublishedCatalog catalog, CancellationToken token) => SendJsonAsync<bool>(binding, session, HttpMethod.Put, "catalog", catalog, token);

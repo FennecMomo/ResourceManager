@@ -176,4 +176,4 @@ public sealed class GitHubSyncService(GitHubSessionManager manager, ILogger<GitH
     }
 }
 
-public sealed record ServerRuntimeOptions(string DataDirectory, string ServerName, int ApiPort, int DiscoveryPort, int AdminPort, string Version, string ApiAddress = "0.0.0.0", int MaxDevices = 256, bool DiscoveryEnabled = true, string? UploadDirectory = null, long MaxCapacityBytes = 107374182400, long MaxFileBytes = 1073741824);
+public sealed record ServerRuntimeOptions(string DataDirectory, string ServerName, int ApiPort, int DiscoveryPort, int AdminPort, string Version, string ApiAddress = "0.0.0.0", int MaxDevices = 256, bool DiscoveryEnabled = true, string? UploadDirectory = null, long MaxCapacityBytes = 0, long MaxFileBytes = 0);

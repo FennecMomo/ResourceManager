@@ -13,19 +13,20 @@ public interface IResourceClient
 }
 
 public sealed class WorkspaceResourceClient(NodeStore store, WorkspaceClient client, ServerBinding binding, Func<WorkspaceSession?> session, string owner,
-    Func<CancellationToken, Task<IReadOnlyList<DiscoveredPeer>>>? discover = null) : IResourceClient, IDisposable
+    Func<CancellationToken, Task<IReadOnlyList<DiscoveredPeer>>>? discover = null, bool serverStored = false) : IResourceClient, IDisposable
 {
     private readonly HttpClient direct = new(new PeerAuthenticationHandler(store, false, false)) { Timeout = TimeSpan.FromMinutes(6), MaxResponseContentBufferSize = 16 * 1024 * 1024 };
     private readonly SemaphoreSlim routeGate = new(1, 1);
     private PeerInfo? directPeer;
     private bool selected;
-    public string RouteName => !selected ? "待检测" : directPeer is null ? "服务器中继" : "直连";
+    public string RouteName => serverStored ? "服务器存储" : !selected ? "待检测" : directPeer is null ? "服务器中继" : "直连";
     public async Task SelectRouteAsync(CancellationToken token)
     {
         await routeGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
             if (selected) return;
+            if (serverStored) { selected = true; return; }
             var member = binding.Cached?.Members.FirstOrDefault(m => m.Profile.DeviceId == owner) ?? throw new IOException("服务器设备资料尚未同步。");
             if (member.PublicKey is null) throw new IOException("请将服务端升级到 0.2.0。");
             store.TrustDeviceKey(owner, member.PublicKey);
@@ -66,6 +67,7 @@ public sealed class WorkspaceResourceClient(NodeStore store, WorkspaceClient cli
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadFromJsonAsync<WorkspaceResourceReply>(WorkspaceProtocol.Json, token).ConfigureAwait(false) ?? throw new InvalidDataException("直连响应为空。");
         }
+        if (serverStored) return await client.StoredResourceAsync(binding, session() ?? throw new IOException("服务器尚未连接。"), request, token).ConfigureAwait(false);
         return await client.RelayAsync(binding, session() ?? throw new IOException("服务器尚未连接。"), request, token).ConfigureAwait(false);
     }
     public async Task<RemoteResource?> GetResourceAsync(PeerInfo peer, string id, CancellationToken token = default)

@@ -33,13 +33,13 @@ public partial class MainWindow
     private void ServerDownload_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: ServerTabRow row } || row.SelectedMember is not { } member || row.SelectedResource?.RemoteRow is not { } selected) return;
-        if (row.Status != "在线" || member.State != "在线" || !selected.Resource.Available) { SetStatus("服务器、发布者或资源当前不可用。"); return; }
+        if (row.Status != "在线" || member.State != "在线" && !selected.Resource.ServerStored || !selected.Resource.Available) { SetStatus("服务器、发布者或资源当前不可用。"); return; }
         using var dialog = new System.Windows.Forms.FolderBrowserDialog { Description = "选择服务器资源的下载保存目录" };
         if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
         try
         {
             var job = downloader.CreateJob(WorkspacePeer(member), selected.Resource, dialog.SelectedPath);
-            store.SaveServerDownload(job.Id, row.Binding.Id, member.Nickname);
+            store.SaveServerDownload(job.Id, row.Binding.Id, member.Nickname, selected.Resource.ServerStored);
             RefreshDownloadsView(); Tabs.SelectedIndex = 5; QueueDownload(job.Id);
         }
         catch (Exception ex) { ShowError("创建下载失败", ex); }
@@ -48,9 +48,9 @@ public partial class MainWindow
     private string DownloadSourceName(DownloadJob job)
     {
         var source = store.GetServerDownload(job.Id);
-        if (source is null) return store.GetPeer(job.PeerId)?.Nickname ?? "未知设备";
+        if (source is null) return "设备直连 / " + (store.GetPeer(job.PeerId)?.Nickname ?? "未知设备");
         var binding = store.GetServerBindings().FirstOrDefault(b => b.Id == source.Value.Server);
-        return $"{binding?.Name ?? "已移除服务器"} / {source.Value.OwnerName}";
+        return $"{(source.Value.Stored ? "服务器存储" : "服务器发布者")} / {binding?.Name ?? "已移除服务器"} / {source.Value.OwnerName}";
     }
     private async Task RunResourceDownloadAsync(string id, IProgress<DownloadJob> progress, CancellationToken token)
     {
@@ -59,7 +59,7 @@ public partial class MainWindow
         var job = store.GetDownload(id)!;
         var row = Servers.FirstOrDefault(s => s.Binding.Id == source.Value.Server) ?? throw new IOException("此任务对应的服务器已移除。");
         if (row.Session is null || row.Status != "在线") throw new IOException("服务器尚未连接，请连接后继续任务。");
-        using var transport = new WorkspaceResourceClient(store, workspaceClient!, row.Binding, () => row.Session, job.PeerId);
+        using var transport = new WorkspaceResourceClient(store, workspaceClient!, row.Binding, () => row.Session, job.PeerId, serverStored: source.Value.Stored);
         await transport.SelectRouteAsync(token);
         SetStatus($"正在从 {row.Name} / {source.Value.OwnerName} 下载（{transport.RouteName}）。");
         var peer = new PeerInfo(job.PeerId, "", 0, source.Value.OwnerName, null, null);

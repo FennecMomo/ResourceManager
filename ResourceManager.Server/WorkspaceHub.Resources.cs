@@ -26,8 +26,8 @@ public sealed partial class WorkspaceHub
     {
         if (catalog.Groups is null || catalog.Resources is null || catalog.Groups.Count > 2000 || catalog.Resources.Count > 2000 || catalog.GroupPermissions?.Count > 2000 ||
             catalog.GroupPermissions?.Any(p => p is null || p.GroupId is null || p.DeviceIds is null || p.DeviceIds.Count > 1000 || p.Access is not (GroupAccess.Public or GroupAccess.Private or GroupAccess.AllowList)) == true ||
-            catalog.Groups.Any(g => g is null || string.IsNullOrEmpty(g.Id) || g.Id.Length > 100 || g.Name is null || g.Name.Length > 200) ||
-            catalog.Resources.Any(r => r?.Resource is null || string.IsNullOrEmpty(r.Resource.Id) || r.Resource.Id.Length > 100 || string.IsNullOrWhiteSpace(r.Resource.Name) || r.Resource.Name.Length > 255 || r.Resource.Note is null || r.Resource.Note.Length > 200 || string.IsNullOrEmpty(r.Resource.GroupId) || r.Resource.Size < 0 || !Enum.IsDefined(r.Resource.Kind) || !Enum.IsDefined(r.Resource.Mode) || r.Allowed is null || r.Allowed.Count > 1000 || r.Allowed.Any(id => !Guid.TryParse(id, out _)) || r.Access is not (GroupAccess.Public or GroupAccess.Private or GroupAccess.AllowList)) ||
+            catalog.Groups.Any(g => g is null || string.IsNullOrEmpty(g.Id) || g.Id.Length > 100 || g.Id == "server-storage" || g.Name is null || g.Name.Length > 200) ||
+            catalog.Resources.Any(r => r?.Resource is null || string.IsNullOrEmpty(r.Resource.Id) || r.Resource.Id.Length > 100 || r.Resource.ServerStored || string.IsNullOrWhiteSpace(r.Resource.Name) || r.Resource.Name.Length > 255 || r.Resource.Note is null || r.Resource.Note.Length > 200 || string.IsNullOrEmpty(r.Resource.GroupId) || r.Resource.Size < 0 || !Enum.IsDefined(r.Resource.Kind) || !Enum.IsDefined(r.Resource.Mode) || r.Allowed is null || r.Allowed.Count > 1000 || r.Allowed.Any(id => !Guid.TryParse(id, out _)) || r.Access is not (GroupAccess.Public or GroupAccess.Private or GroupAccess.AllowList)) ||
             catalog.Resources.Select(r => r.Resource.Id).Distinct().Count() != catalog.Resources.Count || catalog.Groups.Select(g => g.Id).Distinct().Count() != catalog.Groups.Count)
             throw new WorkspaceException("发布目录无效或过大。", HttpStatusCode.BadRequest);
         lock (gate)
@@ -35,7 +35,7 @@ public sealed partial class WorkspaceHub
             Authenticate(token, device, false);
             var json = JsonSerializer.Serialize(catalog, WorkspaceProtocol.Json);
             using var db = Open(); using var cmd = Command(db, "INSERT INTO catalogs(owner,json) VALUES($owner,$json) ON CONFLICT(owner) DO UPDATE SET json=excluded.json", "$owner", device, "$json", json); cmd.ExecuteNonQuery();
-            Signal(); return true;
+            Audit("catalog.publish-permissions", device, "", "OK"); Signal(); return true;
         }
     }
     public WorkspaceOwnerCatalog[] Catalogs(string token, string device)
@@ -46,6 +46,8 @@ public sealed partial class WorkspaceHub
             return Snapshot().Members.Select(member =>
             {
                 var source = ReadCatalog(member.Profile.DeviceId);
+                var stored = StoredCatalog(member.Profile.DeviceId);
+                source = source with { Resources = source.Resources.Concat(stored).ToArray(), Groups = source.Groups.Append(new ResourceGroup("server-storage", "服务器存储", null, int.MaxValue, DateTimeOffset.UnixEpoch)).ToArray(), GroupPermissions = (source.GroupPermissions ?? []).Append(new GroupPermission("server-storage", GroupAccess.Public, [])).ToArray() };
                 var allowed = source.Resources.Where(r => WorkspaceResourceRules.Allows(r, device, member.Profile.DeviceId)).ToArray();
                 var visibleGroups = source.Groups.Where(g => device == member.Profile.DeviceId || source.GroupPermissions?.Any(p => p.GroupId == g.Id && (p.Access == GroupAccess.Public || p.Access == GroupAccess.AllowList && p.DeviceIds.Contains(device))) == true).ToDictionary(g => g.Id);
                 var ids = allowed.Select(r => r.Resource.GroupId).ToHashSet();
@@ -57,7 +59,7 @@ public sealed partial class WorkspaceHub
                 var groupIds = visibleGroups.Keys.Where(ids.Contains).ToHashSet();
                 var groups = visibleGroups.Values.Where(g => groupIds.Contains(g.Id)).Select(g => g.ParentId is not null && !groupIds.Contains(g.ParentId) ? g with { ParentId = null } : g).ToArray();
                 return new WorkspaceOwnerCatalog(member.Profile.DeviceId, member.Online, new(groups, allowed.Select(r => r.Resource).ToArray()),
-                    member.Online ? allowed.Where(r => r.Resource.Available && r.Update is not null && r.Update.ResourceId == r.Resource.Id).Select(r => r.Update!).ToArray() : []);
+                    allowed.Where(r => (member.Online || r.Resource.ServerStored) && r.Resource.Available && r.Update is not null && r.Update.ResourceId == r.Resource.Id).Select(r => r.Update!).ToArray());
             }).ToArray();
         }
     }
@@ -127,7 +129,7 @@ public static partial class WorkspaceEndpoints
     {
         app.MapPut("/api/v1/workspace/catalog", (WorkspacePublishedCatalog catalog, HttpContext c, WorkspaceHub hub) => Execute(() => Results.Ok(hub.Publish(Token(c), Device(c), catalog))));
         app.MapGet("/api/v1/workspace/catalogs", (HttpContext c, WorkspaceHub hub) => Execute(() => Results.Ok(hub.Catalogs(Token(c), Device(c)))));
-        app.MapPost("/api/v1/workspace/relay", (WorkspaceResourceRequest request, HttpContext c, WorkspaceHub hub, CancellationToken token) => ResourceAsync(async () => Results.Ok(await hub.RelayAsync(Token(c), Device(c), request, token))));
+        app.MapPost("/api/v1/workspace/relay", (WorkspaceResourceRequest request, HttpContext c, WorkspaceHub hub, CancellationToken token) => ResourceAsync(async () => { try { var reply = await hub.RelayAsync(Token(c), Device(c), request, token); if (reply.Status >= 400) hub.Audit("relay.denied", Device(c), request.ResourceId, reply.Status.ToString()); return Results.Ok(reply); } catch (WorkspaceException ex) { hub.Audit("relay.denied", Device(c), request.ResourceId, ((int)ex.Code).ToString()); throw; } }));
         app.MapGet("/api/v1/workspace/relay/poll", (HttpContext c, WorkspaceHub hub, CancellationToken token) => ResourceAsync(async () => Results.Ok(await hub.PollRelayAsync(Token(c), Device(c), token))));
         app.MapPost("/api/v1/workspace/relay/{id}", (string id, WorkspaceResourceReply reply, HttpContext c, WorkspaceHub hub) => Execute(() => Results.Ok(hub.ReplyRelay(Token(c), Device(c), id, reply))));
     }
