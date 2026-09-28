@@ -78,7 +78,7 @@ internal static class WindowsDesktopContext
             document = ((dynamic)desktop).Document;
             application = ((dynamic)document).Application;
             ((dynamic)application).ShellExecute(executable, string.Join(" ", forwarded.Select(QuoteArgument)),
-                AppContext.BaseDirectory, "open", 1);
+                AppContext.BaseDirectory, "open", arguments.Contains("--background", StringComparer.OrdinalIgnoreCase) ? 0 : 1);
         }
         finally
         {

@@ -10,6 +10,7 @@ namespace ResourceManager.App;
 public partial class App : System.Windows.Application
 {
     private SingleInstanceCoordinator? singleInstance;
+    private LocalControlServer? localControl;
 
     public App()
     {
@@ -31,12 +32,14 @@ public partial class App : System.Windows.Application
 
     private async void App_Startup(object sender, StartupEventArgs e)
     {
+        var background = e.Args.Contains("--background", StringComparer.OrdinalIgnoreCase);
         try
         {
             if (WindowsDesktopContext.EnsureNativeDesktop(e.Args)) { Shutdown(); return; }
         }
         catch (Exception ex)
         {
+            if (background) { AppLog.Write("后台启动环境检查失败", ex); Shutdown(6); return; }
             System.Windows.MessageBox.Show($"无法确认统一的资料位置，程序尚未打开数据库。\n\n{ex.Message}",
                 "启动失败", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(6);
@@ -63,24 +66,38 @@ public partial class App : System.Windows.Application
         singleInstance = new SingleInstanceCoordinator();
         if (!singleInstance.IsPrimary)
         {
-            if (!arguments.Contains("--startup", StringComparer.OrdinalIgnoreCase))
+            if (!background && !arguments.Contains("--startup", StringComparer.OrdinalIgnoreCase))
                 await SingleInstanceCoordinator.ActivatePrimaryAsync();
             Shutdown();
             return;
         }
 
-        if (!await StorageBootstrap.PrepareAsync()) { Shutdown(); return; }
-        var startup = arguments.Contains("--startup", StringComparer.OrdinalIgnoreCase);
+        if (background)
+        {
+            try
+            {
+                var existing = StorageBootstrap.Locations.Read();
+                if (existing is null || !existing.Initialized || existing.Pending is not null)
+                    throw new IOException("资料尚未初始化或存在待处理迁移；后台启动不会显示设置弹窗。");
+                StorageLocation.ValidateCurrent(existing);
+                NodeDefaults.UseDataDirectory(existing.Directory);
+            }
+            catch (Exception ex) { AppLog.Write("后台启动资料检查失败", ex); Shutdown(7); return; }
+        }
+        else if (!await StorageBootstrap.PrepareAsync()) { Shutdown(); return; }
+        var startup = background || arguments.Contains("--startup", StringComparer.OrdinalIgnoreCase);
         var window = new MainWindow(startup);
         var storage = StorageBootstrap.Locations.Read()!;
         StorageBootstrap.Locations.Save(storage with { Initialized = true });
         MainWindow = window;
         singleInstance.StartListening(() => Dispatcher.BeginInvoke(window.ShowWindow));
+        localControl = new LocalControlServer(window.HandleLocalControlAsync);
         window.Show();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        localControl?.Dispose();
         singleInstance?.Dispose();
         base.OnExit(e);
     }

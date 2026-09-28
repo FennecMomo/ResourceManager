@@ -72,7 +72,7 @@ dotnet publish .\ResourceManager.Server\ResourceManager.Server.csproj -c Release
 
 ## 版本与许可
 
-当前客户端开发版本为 `0.4.4`，服务端版本为 `0.0.1`，两者独立演进。客户端发布使用 `v系统.模块.修改` 标签，服务端发布使用 `server-v系统.模块.修改` 标签。图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows 图标。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
+当前客户端开发版本为 `0.4.5`，服务端版本为 `0.0.1`，两者独立演进。客户端发布使用 `v系统.模块.修改` 标签，服务端发布使用 `server-v系统.模块.修改` 标签。图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows 图标。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
 
 后续需求、拆分版本和验收场景记录在 [开发待办与版本路线](docs/roadmap.md)。
 
@@ -83,3 +83,5 @@ dotnet publish .\ResourceManager.Server\ResourceManager.Server.csproj -c Release
 私发时会把所选内容复制到当前存储目录的 `chat-resources`，使用独立数据库表保存，既不进入“我的发布”，也不进入公开资源目录或本地更新源。原文件后续修改不会改变已准备的副本。接收方可从聊天卡片下载，下载支持暂停、继续；发送方需在线。离线消息在本机排队，重启后继续发送。
 
 取消排队中的私发会移除该副本；清空本机会话也会清理该会话的私发副本并停止提供下载，对方已经保存的文件不受影响。私发沿用现有直连传输，使用随机资源凭证并核对收件设备入口，不代表端到端加密。
+
+本机后台状态查询与测试版切换见 [无干扰控制通道](docs/local-control.md)，使用 `tools/client-control.ps1`，无需操作桌面。
