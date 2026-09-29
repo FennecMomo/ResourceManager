@@ -80,7 +80,7 @@ dotnet publish .\ResourceManager.Server\ResourceManager.Server.csproj -c Release
 
 ## 版本与许可
 
-当前客户端开发版本为 `0.7.1`，服务端开发版本为 `0.3.0`，两者独立演进。客户端发布使用 `v系统.模块.修改` 标签，服务端发布使用 `server-v系统.模块.修改` 标签。图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows 图标。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
+当前客户端开发版本为 `0.7.2`，服务端开发版本为 `0.3.0`，两者独立演进。客户端发布使用 `v系统.模块.修改` 标签，服务端发布使用 `server-v系统.模块.修改` 标签。图标的矢量原稿位于 `assets/icon.svg`，使用 `python -m pip install pillow cairosvg` 和 `python tools/render_icon.py` 可重新生成 Windows 图标。变更记录见 [CHANGELOG.md](CHANGELOG.md)。项目采用 [MIT 许可证](LICENSE)。本机 SSH 密钥、签名文件和打包产物均不提交到仓库。
 
 后续需求、拆分版本和验收场景记录在 [开发待办与版本路线](docs/roadmap.md)。
 
