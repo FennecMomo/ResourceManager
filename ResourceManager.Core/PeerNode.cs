@@ -387,6 +387,12 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
         CancellationToken cancellationToken = default)
     {
         var hello = await ProbeAsync(peer, cancellationToken).ConfigureAwait(false);
+        return await GetCatalogAfterProbeAsync(peer, hello, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<(PeerHello Hello, IReadOnlyList<RemoteResource> Resources, IReadOnlyList<ResourceGroup> Groups)> GetCatalogAfterProbeAsync(
+        PeerInfo peer, PeerHello hello, CancellationToken cancellationToken = default)
+    {
         if ((hello.Capabilities ?? []).Contains("resource-groups-v1", StringComparer.Ordinal))
         {
             var tree = await http.GetFromJsonAsync<ResourceTreeCatalog>(Route(peer, "resource-catalog"), Json, cancellationToken).ConfigureAwait(false)

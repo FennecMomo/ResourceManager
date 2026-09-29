@@ -82,7 +82,7 @@ internal sealed class PeerAuthenticationHandler(NodeStore store, bool supportsRe
 {
     private readonly HttpClient handshake = new() { Timeout = TimeSpan.FromSeconds(8) };
     private readonly ConcurrentDictionary<string, (PeerHello Hello, DateTimeOffset Until)> peers = new();
-    private readonly SemaphoreSlim connecting = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> connecting = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -118,7 +118,8 @@ internal sealed class PeerAuthenticationHandler(NodeStore store, bool supportsRe
     private async Task<PeerHello?> EnsurePeerAsync(string authority, CancellationToken token)
     {
         if (peers.TryGetValue(authority, out var cached) && cached.Until > DateTimeOffset.UtcNow) return cached.Hello;
-        await connecting.WaitAsync(token).ConfigureAwait(false);
+        var gate = connecting.GetOrAdd(authority, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(token).ConfigureAwait(false);
         try
         {
             if (peers.TryGetValue(authority, out cached) && cached.Until > DateTimeOffset.UtcNow) return cached.Hello;
@@ -152,12 +153,16 @@ internal sealed class PeerAuthenticationHandler(NodeStore store, bool supportsRe
             peers[authority] = (signed.Hello, DateTimeOffset.UtcNow.AddMinutes(2));
             return signed.Hello;
         }
-        finally { connecting.Release(); }
+        finally { gate.Release(); }
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { handshake.Dispose(); connecting.Dispose(); }
+        if (disposing)
+        {
+            handshake.Dispose();
+            foreach (var gate in connecting.Values) gate.Dispose();
+        }
         base.Dispose(disposing);
     }
 }

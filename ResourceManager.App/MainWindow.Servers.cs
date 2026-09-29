@@ -31,7 +31,7 @@ public partial class MainWindow
     }
     private async Task RunServerAsync(ServerTabRow row, CancellationToken token)
     {
-        var retry = 1; var cursor = ""; string? profile = null;
+        var retry = 1; var failures = 0; var cursor = ""; string? profile = null;
         try
         {
             while (!token.IsCancellationRequested)
@@ -43,22 +43,27 @@ public partial class MainWindow
                     {
                         await StopPublicationAsync(row);
                         row.Update("连接中", null);
-                        row.Session = await workspaceClient!.JoinAsync(row.Binding, token); profile = currentProfile; cursor = "";
-                        var capabilities = await workspaceClient.InspectAsync(row.Address, token);
+                        using var joinDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                        joinDeadline.CancelAfter(TimeSpan.FromSeconds(15));
+                        row.Session = await workspaceClient!.JoinAsync(row.Binding, joinDeadline.Token); profile = currentProfile; cursor = "";
+                        var capabilities = await workspaceClient.InspectAsync(row.Address, joinDeadline.Token);
                         row.ServerVersion = capabilities.Version;
                         row.SupportsResources = capabilities.Features?.Contains("published-resources-v1") == true;
                         row.SupportsStorage = capabilities.Features?.Contains("stored-resources-v1") == true;
                     }
-                    var snapshot = await workspaceClient!.WatchAsync(row.Binding, row.Session, cursor, token);
+                    using var watchDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    watchDeadline.CancelAfter(TimeSpan.FromSeconds(28));
+                    var snapshot = await workspaceClient!.WatchAsync(row.Binding, row.Session, cursor, watchDeadline.Token);
                     token.ThrowIfCancellationRequested();
                     var save = cursor != snapshot.Cursor || row.Status != "在线";
-                    cursor = snapshot.Cursor; retry = 1;
+                    cursor = snapshot.Cursor; retry = 1; failures = 0;
                     row.Update("在线", null, snapshot);
                     if (save) SaveServerState(row);
                     if (row.SupportsResources)
                     {
-                        row.SetCatalogs(await workspaceClient!.CatalogsAsync(row.Binding, row.Session, token));
-                        RefreshFavoritesView();
+                        if (row.CatalogRefreshWorker is not { IsCompleted: false } &&
+                            DateTimeOffset.UtcNow >= row.CatalogRetryAfter)
+                            row.CatalogRefreshWorker = RefreshServerCatalogsAsync(row, row.Session, token);
                         if (row.PublicationWorker is null)
                         {
                             row.PublicationCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -76,13 +81,41 @@ public partial class MainWindow
                 catch (Exception ex)
                 {
                     await StopPublicationAsync(row);
-                    row.Session = null; cursor = ""; row.Update("离线 · 自动重连", ex.Message); SaveServerState(row);
-                    await Task.Delay(TimeSpan.FromSeconds(retry), token); retry = Math.Min(retry * 2, 30);
+                    row.Session = null; cursor = ""; failures++;
+                    var delay = failures >= 3 ? 45 : retry;
+                    row.Update(failures >= 3 ? "响应慢 · 稍后重试" : "离线 · 自动重连", ex.Message);
+                    SaveServerState(row);
+                    await Task.Delay(TimeSpan.FromSeconds(delay), token);
+                    retry = Math.Min(retry * 2, 30);
                 }
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         finally { await StopPublicationAsync(row); }
+    }
+    private async Task RefreshServerCatalogsAsync(ServerTabRow row, WorkspaceSession session, CancellationToken token)
+    {
+        try
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+            deadline.CancelAfter(TimeSpan.FromSeconds(10));
+            var catalogs = await workspaceClient!.CatalogsAsync(row.Binding, session, deadline.Token);
+            if (token.IsCancellationRequested || !ReferenceEquals(row.Session, session)) return;
+            row.SetCatalogs(catalogs);
+            row.CatalogFailures = 0;
+            row.CatalogRetryAfter = DateTimeOffset.MinValue;
+            row.SyncError = null;
+            RefreshFavoritesView();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            row.CatalogFailures++;
+            row.CatalogRetryAfter = DateTimeOffset.UtcNow.AddSeconds(row.CatalogFailures >= 2 ? 60 : 15);
+            row.SyncError = "资源目录响应慢，稍后自动重试；在线名单仍会继续刷新。";
+            row.Notify();
+            AppLog.Write($"服务器 {row.Name} 资源目录刷新失败", ex);
+        }
     }
     private static async Task StopPublicationAsync(ServerTabRow row)
     {
@@ -99,12 +132,14 @@ public partial class MainWindow
     {
         row.Cancellation?.Cancel();
         if (row.Worker is not null) await row.Worker;
+        if (row.CatalogRefreshWorker is not null) await row.CatalogRefreshWorker;
         if (row.Session is { } session)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try { await workspaceClient!.LeaveAsync(row.Binding, session, timeout.Token); } catch { }
         }
         row.Session = null; row.Cancellation?.Dispose(); row.Cancellation = null; row.Worker = null;
+        row.CatalogRefreshWorker = null;
     }
     private async Task StopServersAsync()
     {
@@ -167,6 +202,9 @@ public partial class MainWindow
         internal string? SyncError;
         internal CancellationTokenSource? PublicationCancellation;
         internal Task? PublicationWorker;
+        internal Task? CatalogRefreshWorker;
+        internal int CatalogFailures;
+        internal DateTimeOffset CatalogRetryAfter;
         internal WorkspaceOwnerCatalog[] Catalogs = [];
         public ObservableCollection<ResourceTreeNode> ResourceTree { get; } = [];
         private ServerMemberRow? selectedMember;
@@ -199,6 +237,11 @@ public partial class MainWindow
         internal void Update(string status, string? error, WorkspaceSnapshot? snapshot = null)
         {
             Binding = Binding with { Status = status, Error = error, Cached = snapshot ?? Binding.Cached };
+            if (status == "在线" && Binding.Cached is { } roster)
+            {
+                var online = roster.Members.ToDictionary(member => member.Profile.DeviceId, member => member.Online);
+                Catalogs = Catalogs.Select(catalog => catalog with { Online = online.GetValueOrDefault(catalog.Owner) }).ToArray();
+            }
             var selected = selectedMember?.DeviceId;
             Members.Clear();
             foreach (var member in (Binding.Cached?.Members ?? []).OrderByDescending(m => m.Online).ThenBy(m => m.Profile.Nickname))

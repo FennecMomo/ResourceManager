@@ -102,7 +102,8 @@ internal static class Program
                 Require(window.Uploads.Any(u => u.Id == uploadJob.Id && u.Text.Contains("已完成")), "persistent upload task exposes completion and byte progress");
                 var permissionDialog = new StoredPermissionDialog(row.Binding.Cached!.Members, new(GroupAccess.Private, []));
                 Require(permissionDialog.Permission.Access == GroupAccess.Private && !permissionDialog.IsVisible, "stored permission editor preserves private selection without opening a window"); permissionDialog.Close();
-                Require(row.VersionDetail.Contains("0.3.0") && row.VersionDetail.Contains("0.6.4"), "server and client versions are independently displayed");
+                var clientVersion = typeof(MainWindow).Assembly.GetName().Version!.ToString(3);
+                Require(row.VersionDetail.Contains("0.3.0") && row.VersionDetail.Contains(clientVersion), "server and client versions are independently displayed");
                 typeof(MainWindow).GetField("editingServer", Private)!.SetValue(window, true);
                 var control = await window.HandleLocalControlAsync(new(1, "shutdown", Environment.ProcessId), default);
                 Require(!control.Success && control.Error == "editing_server", "background shutdown protects server editor");
@@ -111,10 +112,12 @@ internal static class Program
                 await one.DisposeAsync(); one = null;
                 await Until(() => row.Status.StartsWith("离线"));
                 Require(row.Members.Count == 2 && row.Members.All(m => m.State == "缓存 · 待核对"), "offline roster retained and never presented as live");
+                row.Catalogs = [];
                 one = await Host.Start(Path.Combine(rootDir, "one"), address);
                 await Until(() => row.Status == "在线");
                 Require(row.Members.Count == 2, "client automatically reconnects to restarted server with original identity");
-                await Until(() => row.Catalogs.Any(c => c.Owner == otherStore.GetSettings().Profile.DeviceId && c.Catalog.Resources.Count == 2));
+                await Until(() => row.Catalogs.Any(c => c.Owner == otherStore.GetSettings().Profile.DeviceId &&
+                    c.Catalog.Resources.Count == 2 && !c.Online));
                 Require(!row.Catalogs.Single(c => c.Owner == otherStore.GetSettings().Profile.DeviceId).Online, "persisted catalog survives restart while offline publisher is not downloadable");
                 var replacement = await client.JoinAsync(row.Binding);
                 await Until(() => row.Status == "连接受限");

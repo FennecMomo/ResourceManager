@@ -8,7 +8,7 @@ public sealed class GatewayDiscoveryService(NodeStore store, PeerClient client)
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(1);
 
     public async Task<GatewayRefreshResult> RefreshAsync(GatewayInfo gateway, IProgress<string>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, IProgress<PeerInfo>? foundProgress = null)
     {
         var found = new ConcurrentDictionary<string, Candidate>(StringComparer.Ordinal);
         var checkedPorts = new ConcurrentDictionary<int, byte>();
@@ -20,7 +20,7 @@ public sealed class GatewayDiscoveryService(NodeStore store, PeerClient client)
             .Select(group => group.OrderByDescending(item => item.LastSuccessUtc).First())
             .ToArray();
         await ProbeEndpointsAsync(gateway, cached.Select(item => (item.Port, (string?)item.DeviceId)), found,
-            checkedPorts, cancellationToken).ConfigureAwait(false);
+            checkedPorts, foundProgress, cancellationToken).ConfigureAwait(false);
 
         var bootstrap = found.Values.FirstOrDefault(item => SupportsGateway(item.Health));
         if (bootstrap is null)
@@ -29,7 +29,7 @@ public sealed class GatewayDiscoveryService(NodeStore store, PeerClient client)
             var ports = Enumerable.Range(gateway.PortStart, gateway.PortEnd - gateway.PortStart + 1)
                 .Where(port => !checkedPorts.ContainsKey(port))
                 .Select(port => (port, (string?)null));
-            await ProbeEndpointsAsync(gateway, ports, found, checkedPorts, cancellationToken).ConfigureAwait(false);
+            await ProbeEndpointsAsync(gateway, ports, found, checkedPorts, foundProgress, cancellationToken).ConfigureAwait(false);
             bootstrap = found.Values.FirstOrDefault(item => SupportsGateway(item.Health));
         }
 
@@ -66,7 +66,7 @@ public sealed class GatewayDiscoveryService(NodeStore store, PeerClient client)
             var uncheckedPorts = Enumerable.Range(gateway.PortStart, gateway.PortEnd - gateway.PortStart + 1)
                 .Where(port => !checkedPorts.ContainsKey(port))
                 .Select(port => (port, (string?)null));
-            await ProbeEndpointsAsync(gateway, uncheckedPorts, found, checkedPorts, cancellationToken).ConfigureAwait(false);
+            await ProbeEndpointsAsync(gateway, uncheckedPorts, found, checkedPorts, foundProgress, cancellationToken).ConfigureAwait(false);
             missing = snapshot.Devices
                 .Where(device => !found.ContainsKey(device.DeviceId))
                 .Select(device => device.DeviceId)
@@ -102,7 +102,10 @@ public sealed class GatewayDiscoveryService(NodeStore store, PeerClient client)
                 if (verified is null)
                     mappingFailures.Add($"{result.DeviceId} 映射成功但外部验证失败");
                 else
+                {
                     found[result.DeviceId] = verified;
+                    foundProgress?.Report(verified.Peer);
+                }
             }
         }
 
@@ -119,7 +122,7 @@ public sealed class GatewayDiscoveryService(NodeStore store, PeerClient client)
 
     private async Task ProbeEndpointsAsync(GatewayInfo gateway, IEnumerable<(int Port, string? ExpectedDeviceId)> endpoints,
         ConcurrentDictionary<string, Candidate> found, ConcurrentDictionary<int, byte> checkedPorts,
-        CancellationToken cancellationToken)
+        IProgress<PeerInfo>? foundProgress, CancellationToken cancellationToken)
     {
         using var concurrency = new SemaphoreSlim(ProbeConcurrency, ProbeConcurrency);
         var tasks = endpoints.Select(async endpoint =>
@@ -130,7 +133,11 @@ public sealed class GatewayDiscoveryService(NodeStore store, PeerClient client)
                 checkedPorts.TryAdd(endpoint.Port, 0);
                 var candidate = await ProbeOneAsync(gateway, endpoint.Port, endpoint.ExpectedDeviceId,
                     cancellationToken).ConfigureAwait(false);
-                if (candidate is not null) found[candidate.Peer.DeviceId] = candidate;
+                if (candidate is not null)
+                {
+                    found[candidate.Peer.DeviceId] = candidate;
+                    foundProgress?.Report(candidate.Peer);
+                }
             }
             finally { concurrency.Release(); }
         }).ToArray();

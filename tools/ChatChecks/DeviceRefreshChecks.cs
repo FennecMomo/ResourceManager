@@ -32,10 +32,27 @@ internal static partial class Program
         var group = store.SaveResourceGroup("保留设备权限");
         store.SetGroupPermission(group.Id, GroupAccess.AllowList, [peer.DeviceId]);
         var message = new ChatService(store, client).QueueText(peer.DeviceId, "离线仍保留");
-        Task Refresh() => (Task)typeof(MainWindow).GetMethod("RefreshAllAsync", Private)!.Invoke(window, null)!;
+        Task Refresh() => (Task)typeof(MainWindow).GetMethod("RefreshAllAsync", Private)!
+            .Invoke(window, [null, false])!;
         var grid = (ListBox)window.FindName("PeersGrid");
 
-        await Refresh();
+        using var stalled = new TcpListener(IPAddress.Loopback, 0);
+        stalled.Start();
+        var slowPort = ((IPEndPoint)stalled.LocalEndpoint).Port;
+        var slowId = Guid.NewGuid().ToString();
+        store.UpsertPeer(new PeerInfo(slowId, "127.0.0.1", slowPort, "AAA 慢入口", null, null));
+        var stalledRequest = Task.Run(async () =>
+        {
+            using var socket = await stalled.AcceptTcpClientAsync();
+            await Task.Delay(TimeSpan.FromSeconds(4));
+        });
+        var progressiveRefresh = Refresh();
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        var appearedEarly = !progressiveRefresh.IsCompleted && window.Peers.Any(row => row.Peer.DeviceId == peer.DeviceId);
+        await progressiveRefresh;
+        Require(appearedEarly, "healthy peer appears before a stalled endpoint times out");
+        await stalledRequest;
+        store.RemovePeer(slowId);
         grid.SelectedItem = window.Peers.Single(row => row.Peer.DeviceId == peer.DeviceId);
         Require(window.RemoteResources.Any(row => row.Resource.Id == resource.Id), "online peer and resources appear after refresh");
         await node.StopAsync();

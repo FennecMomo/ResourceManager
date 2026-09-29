@@ -52,6 +52,10 @@ public partial class MainWindow : Window
     private readonly HashSet<string> removingDownloads = [];
     private byte[]? pendingAvatar;
     private readonly SemaphoreSlim refreshGate = new(1, 1);
+    private readonly SemaphoreSlim deviceRefreshGate = new(1, 1);
+    private readonly Dictionary<string, (int Failures, DateTimeOffset RetryAfter)> endpointFailures = [];
+    private readonly Dictionary<string, (int Failures, DateTimeOffset RetryAfter)> gatewayFailures = [];
+    private DateTimeOffset nextAutomaticDiscovery = DateTimeOffset.MinValue;
     private bool exiting;
     private bool checkingUpdate;
     private bool startupUpdateCheckStarted;
@@ -253,7 +257,7 @@ public partial class MainWindow : Window
         StartServers();
         timer.Start();
         StartStartupUpdateCheck();
-        await RefreshAllAsync();
+        await RefreshDevicesAsync(includeGatewayScan: false);
         await PumpChatSafeAsync();
         await RefreshRouterInfoAsync();
         await MaintainMappingsAsync();
@@ -296,7 +300,10 @@ public partial class MainWindow : Window
 
     private async Task TimerTickAsync()
     {
-        await RefreshAllAsync();
+        if (DateTimeOffset.UtcNow >= nextAutomaticDiscovery)
+            await RefreshDevicesAsync(includeGatewayScan: false);
+        else
+            await RefreshAllAsync(skipIfBusy: true);
         await PumpChatSafeAsync();
         if (Tabs.SelectedIndex == 2) await RefreshGitAsync();
         if (DateTimeOffset.UtcNow >= nextRouterInfoRefresh) await RefreshRouterInfoAsync();
@@ -356,7 +363,7 @@ public partial class MainWindow : Window
         foreach (var peer in store.GetPeers())
         {
             // Keep persisted endpoints/history for automatic reconnection, but drop lost rows from this view.
-            if (peerStatus.GetValueOrDefault(peer.DeviceId) is "离线" or "设备已变更") continue;
+            if (peerStatus.GetValueOrDefault(peer.DeviceId) is not ("在线" or "身份校验失败")) continue;
             var endpoint = store.GetPeerEndpoints(peer.DeviceId)
                 .FirstOrDefault(item => item.Ip == peer.Ip && item.Port == peer.Port && item.Source != "DeviceChanged");
             var gateway = endpoint?.GatewayId is null
@@ -403,7 +410,13 @@ public partial class MainWindow : Window
             return;
         }
         PeerHeading.Text = $"{row.Nickname} 的资源 · {row.Status}";
-        if (row.Status != "在线" || !peerCatalogs.TryGetValue(row.Peer.DeviceId, out var resources))
+        if (row.Status == "在线" && !peerCatalogs.TryGetValue(row.Peer.DeviceId, out var resources))
+        {
+            PeerEmptyText.Text = "设备在线，资源目录暂时未加载；稍后会自动重试。";
+            UpdateActions();
+            return;
+        }
+        if (row.Status != "在线" || !peerCatalogs.TryGetValue(row.Peer.DeviceId, out resources))
         {
             PeerEmptyText.Text = row.Status == "设备已变更"
                 ? "这个地址现在属于另一台设备。请检查连接地址。"
@@ -460,75 +473,127 @@ public partial class MainWindow : Window
         UpdateActions();
     }
 
-    private async Task RefreshAllAsync()
+    private async Task RefreshAllAsync(PeerEndpointKind? kind = null, bool skipIfBusy = false)
     {
         if (exiting) return;
-        try { await refreshGate.WaitAsync(updateCancellation.Token); }
+        try
+        {
+            if (skipIfBusy)
+            {
+                if (!await refreshGate.WaitAsync(0)) return;
+            }
+            else await refreshGate.WaitAsync(updateCancellation.Token);
+        }
         catch (OperationCanceledException) when (exiting) { return; }
         try
         {
             if (exiting) return;
-            foreach (var peer in store.GetPeers())
+            using var concurrency = new SemaphoreSlim(6);
+            var tasks = store.GetPeers().Select(async peer =>
             {
-                var candidates = store.GetPeerEndpoints(peer.DeviceId).Where(item => item.Source != "DeviceChanged")
-                    .GroupBy(item => (item.Ip, item.Port))
-                    .Select(group => group.OrderByDescending(item => item.LastSuccessUtc).First())
-                    .OrderBy(item => item.Kind == PeerEndpointKind.Direct ? 0 : 1)
-                    .ThenByDescending(item => item.LastSuccessUtc)
-                    .ToArray();
-                var connected = false;
-                foreach (var endpoint in candidates)
-                {
-                    var candidate = peer with { Ip = endpoint.Ip, Port = endpoint.Port };
-                    try
-                    {
-                        var catalog = await client.GetCatalogAsync(candidate);
-                        peerCatalogs[peer.DeviceId] = catalog.Resources;
-                        peerResourceGroups[peer.DeviceId] = catalog.Groups;
-                        peerCapabilities[peer.DeviceId] = catalog.Hello.Capabilities ?? [];
-                        foreach (var favorite in store.GetFavorites().Where(f => f.PeerId == peer.DeviceId))
-                        {
-                            favoriteAccessStates.Remove((peer.DeviceId, favorite.ResourceId));
-                            if (catalog.Resources.Any(r => r.Id == favorite.ResourceId) || !(catalog.Hello.Capabilities ?? []).Contains("resource-access-v1")) continue;
-                            try
-                            {
-                                var found = await client.GetResourceAsync(candidate, favorite.ResourceId);
-                                favoriteAccessStates[(peer.DeviceId, favorite.ResourceId)] = found is null ? "资源已撤销" : "请刷新目录";
-                            }
-                            catch (UnauthorizedAccessException) { favoriteAccessStates[(peer.DeviceId, favorite.ResourceId)] = "无权访问"; }
-                            catch { favoriteAccessStates[(peer.DeviceId, favorite.ResourceId)] = "无法核对权限"; }
-                        }
-                        if (peerStatus.GetValueOrDefault(peer.DeviceId) != "在线")
-                            store.WakeChatMessages(peer.DeviceId);
-                        peerStatus[peer.DeviceId] = "在线";
-                        connected = true;
-                        break;
-                    }
-                    catch (InvalidOperationException ex) when (ex.Message.Contains("另一台设备") ||
-                                                                 ex.Message.Contains("另一台"))
-                    {
-                        store.MarkEndpointDeviceChanged(endpoint);
-                        peerStatus[peer.DeviceId] = "设备已变更";
-                    }
-                    catch (InvalidOperationException ex) when (ex.Message.Contains("身份"))
-                    {
-                        peerStatus[peer.DeviceId] = "身份校验失败";
-                    }
-                    catch { }
-                }
-                if (connected) continue;
-                if (peerStatus.GetValueOrDefault(peer.DeviceId) is not ("设备已变更" or "身份校验失败"))
-                    peerStatus[peer.DeviceId] = "离线";
-                peerCatalogs.Remove(peer.DeviceId);
-                peerResourceGroups.Remove(peer.DeviceId);
-                peerCapabilities.Remove(peer.DeviceId);
-            }
+                await concurrency.WaitAsync(updateCancellation.Token);
+                try { await RefreshPeerAsync(peer, kind); }
+                finally { concurrency.Release(); }
+            }).ToArray();
+            await Task.WhenAll(tasks);
             RefreshPeersView();
             RefreshFavoritesView();
             RefreshDownloadsView();
             RefreshChatConversations();
         }
+        catch (OperationCanceledException) when (exiting) { }
         finally { refreshGate.Release(); }
+    }
+
+    private async Task RefreshPeerAsync(PeerInfo peer, PeerEndpointKind? kind)
+    {
+        if (kind == PeerEndpointKind.Gateway && peerStatus.GetValueOrDefault(peer.DeviceId) == "在线") return;
+        var candidates = store.GetPeerEndpoints(peer.DeviceId)
+            .Where(item => item.Source != "DeviceChanged" && (kind is null || item.Kind == kind))
+            .GroupBy(item => (item.Ip, item.Port))
+            .Select(group => group.OrderByDescending(item => item.LastSuccessUtc).First())
+            .OrderBy(item => item.Kind == PeerEndpointKind.Direct ? 0 : 1)
+            .ThenByDescending(item => item.LastSuccessUtc).ToArray();
+        using var probeBudget = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token);
+        probeBudget.CancelAfter(TimeSpan.FromSeconds(8));
+        foreach (var endpoint in candidates)
+        {
+            if (probeBudget.IsCancellationRequested) break;
+            var circuitKey = $"{peer.DeviceId}|{endpoint.Ip}|{endpoint.Port}";
+            if (endpointFailures.TryGetValue(circuitKey, out var failure) && failure.RetryAfter > DateTimeOffset.UtcNow)
+                continue;
+            var candidate = peer with { Ip = endpoint.Ip, Port = endpoint.Port };
+            PeerHello hello;
+            try
+            {
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(probeBudget.Token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(3));
+                hello = await client.ProbeAsync(candidate, deadline.Token);
+                endpointFailures.Remove(circuitKey);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("另一台设备") || ex.Message.Contains("另一台"))
+            {
+                store.MarkEndpointDeviceChanged(endpoint);
+                peerStatus[peer.DeviceId] = "设备已变更";
+                continue;
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("身份"))
+            {
+                peerStatus[peer.DeviceId] = "身份校验失败";
+                continue;
+            }
+            catch (OperationCanceledException) when (updateCancellation.IsCancellationRequested) { throw; }
+            catch (OperationCanceledException) when (probeBudget.IsCancellationRequested) { break; }
+            catch
+            {
+                var count = failure.Failures + 1;
+                endpointFailures[circuitKey] = (count, count >= 2 ? DateTimeOffset.UtcNow.AddSeconds(45) : DateTimeOffset.MinValue);
+                continue;
+            }
+            if (peerStatus.GetValueOrDefault(peer.DeviceId) != "在线") store.WakeChatMessages(peer.DeviceId);
+            peerStatus[peer.DeviceId] = "在线";
+            RefreshPeersView();
+            try
+            {
+                using var deadline = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token);
+                deadline.CancelAfter(TimeSpan.FromSeconds(6));
+                var catalog = await client.GetCatalogAfterProbeAsync(candidate, hello, deadline.Token);
+                peerCatalogs[peer.DeviceId] = catalog.Resources;
+                peerResourceGroups[peer.DeviceId] = catalog.Groups;
+                peerCapabilities[peer.DeviceId] = catalog.Hello.Capabilities ?? [];
+                using var favoritesDeadline = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token);
+                favoritesDeadline.CancelAfter(TimeSpan.FromSeconds(4));
+                foreach (var favorite in store.GetFavorites().Where(item => item.PeerId == peer.DeviceId))
+                {
+                    favoriteAccessStates.Remove((peer.DeviceId, favorite.ResourceId));
+                    if (catalog.Resources.Any(item => item.Id == favorite.ResourceId) || !(hello.Capabilities ?? []).Contains("resource-access-v1")) continue;
+                    try
+                    {
+                        using var checkDeadline = CancellationTokenSource.CreateLinkedTokenSource(favoritesDeadline.Token);
+                        checkDeadline.CancelAfter(TimeSpan.FromSeconds(2));
+                        var found = await client.GetResourceAsync(candidate, favorite.ResourceId, checkDeadline.Token);
+                        favoriteAccessStates[(peer.DeviceId, favorite.ResourceId)] = found is null ? "资源已撤销" : "请刷新目录";
+                    }
+                    catch (UnauthorizedAccessException) { favoriteAccessStates[(peer.DeviceId, favorite.ResourceId)] = "无权访问"; }
+                    catch { favoriteAccessStates[(peer.DeviceId, favorite.ResourceId)] = "无法核对权限"; }
+                }
+            }
+            catch (OperationCanceledException) when (updateCancellation.IsCancellationRequested) { throw; }
+            catch
+            {
+                peerCatalogs.Remove(peer.DeviceId);
+                peerResourceGroups.Remove(peer.DeviceId);
+                peerCapabilities.Remove(peer.DeviceId);
+            }
+            RefreshPeersView();
+            return;
+        }
+        if (peerStatus.GetValueOrDefault(peer.DeviceId) is not ("设备已变更" or "身份校验失败"))
+            peerStatus[peer.DeviceId] = "离线";
+        peerCatalogs.Remove(peer.DeviceId);
+        peerResourceGroups.Remove(peer.DeviceId);
+        peerCapabilities.Remove(peer.DeviceId);
+        RefreshPeersView();
     }
 
     private void Nav_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -609,36 +674,10 @@ public partial class MainWindow : Window
     private async void RefreshPeers_Click(object sender, RoutedEventArgs e)
     {
         RefreshPeersButton.IsEnabled = false;
-        RefreshPeersButton.Content = "正在查找…";
-        SetStatus("正在查找同一局域网内的设备…");
+        RefreshPeersButton.Content = "正在刷新…";
         try
         {
-            var found = await discovery.DiscoverAsync(TimeSpan.FromSeconds(2), updateCancellation.Token);
-            if (found.Count == 0)
-            {
-                await RefreshAllAsync();
-                SetStatus("没有发现新的局域网设备；已刷新现有设备状态。");
-                return;
-            }
-
-            var attempts = found.Select(async item =>
-            {
-                try
-                {
-                    var peer = await client.ConnectAsync(item.Ip, item.Port, item.DeviceId, updateCancellation.Token);
-                    return (Peer: peer, Error: (Exception?)null);
-                }
-                catch (Exception ex) { return (Peer: (PeerInfo?)null, Error: ex); }
-            });
-            var results = await Task.WhenAll(attempts);
-            var connected = results.Where(result => result.Peer is not null).Select(result => result.Peer!).ToArray();
-            await RefreshAllAsync();
-            if (connected.Length == 1)
-                PeersGrid.SelectedItem = Peers.FirstOrDefault(row => row.Peer.DeviceId == connected[0].DeviceId);
-            var failed = results.Length - connected.Length;
-            SetStatus(failed == 0
-                ? $"找到并连接了 {connected.Length} 台设备。"
-                : $"找到 {results.Length} 台设备，已连接 {connected.Length} 台，{failed} 台连接失败。");
+            await RefreshDevicesAsync(includeGatewayScan: true);
         }
         catch (OperationCanceledException) when (exiting) { }
         catch (Exception ex) { ShowError("查找设备失败", ex); }
@@ -650,6 +689,92 @@ public partial class MainWindow : Window
                 RefreshPeersButton.IsEnabled = true;
             }
         }
+    }
+
+    private async Task RefreshDevicesAsync(bool includeGatewayScan)
+    {
+        if (exiting) return;
+        if (includeGatewayScan)
+            await deviceRefreshGate.WaitAsync(updateCancellation.Token);
+        else if (!await deviceRefreshGate.WaitAsync(0)) return;
+        nextAutomaticDiscovery = DateTimeOffset.UtcNow.AddMinutes(1);
+        try
+        {
+            if (includeGatewayScan)
+            {
+                foreach (var peer in store.GetPeers()) peerStatus[peer.DeviceId] = "未检查";
+                RefreshPeersView();
+            }
+            SetStatus("正在检查已保存的直连设备…");
+            await RefreshAllAsync(PeerEndpointKind.Direct);
+
+            SetStatus("正在搜索局域网设备…");
+            IReadOnlyList<DiscoveredPeer> found;
+            try { found = await discovery.DiscoverAsync(TimeSpan.FromSeconds(2), updateCancellation.Token); }
+            catch (OperationCanceledException) when (exiting) { return; }
+            catch (Exception ex) { AppLog.Write("局域网设备搜索失败", ex); found = []; }
+            using (var concurrency = new SemaphoreSlim(6))
+            {
+                var connects = found.Select(async item =>
+                {
+                    await concurrency.WaitAsync(updateCancellation.Token);
+                    try
+                    {
+                        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token);
+                        deadline.CancelAfter(TimeSpan.FromSeconds(3));
+                        var peer = await client.ConnectAsync(item.Ip, item.Port, item.DeviceId, deadline.Token);
+                        endpointFailures.Remove($"{peer.DeviceId}|{peer.Ip}|{peer.Port}");
+                        peerStatus[peer.DeviceId] = "在线";
+                        RefreshPeersView();
+                        await RefreshPeerAsync(peer, PeerEndpointKind.Direct);
+                    }
+                    catch (OperationCanceledException) when (updateCancellation.IsCancellationRequested) { throw; }
+                    catch { }
+                    finally { concurrency.Release(); }
+                }).ToArray();
+                await Task.WhenAll(connects);
+            }
+
+            SetStatus("正在检查路由器入口…");
+            await RefreshAllAsync(PeerEndpointKind.Gateway);
+            if (includeGatewayScan)
+            {
+                using var scanConcurrency = new SemaphoreSlim(2);
+                var gatewayTasks = store.GetGateways().Select(async gateway =>
+                {
+                    if (gatewayFailures.TryGetValue(gateway.Id, out var failure) && failure.RetryAfter > DateTimeOffset.UtcNow)
+                        return;
+                    await scanConcurrency.WaitAsync(updateCancellation.Token);
+                    try
+                    {
+                        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token);
+                        deadline.CancelAfter(TimeSpan.FromSeconds(12));
+                        var progress = new Progress<PeerInfo>(peer =>
+                        {
+                            peerStatus[peer.DeviceId] = "在线";
+                            RefreshPeersView();
+                        });
+                        await gatewayDiscovery.RefreshAsync(gateway, cancellationToken: deadline.Token, foundProgress: progress);
+                        gatewayFailures.Remove(gateway.Id);
+                    }
+                    catch (OperationCanceledException) when (updateCancellation.IsCancellationRequested) { throw; }
+                    catch (Exception ex)
+                    {
+                        var count = failure.Failures + 1;
+                        gatewayFailures[gateway.Id] = (count, count >= 2 ? DateTimeOffset.UtcNow.AddSeconds(45) : DateTimeOffset.MinValue);
+                        AppLog.Write($"路由器入口 {gateway.Name} 扫描未完成", ex);
+                    }
+                    finally { scanConcurrency.Release(); }
+                }).ToArray();
+                await Task.WhenAll(gatewayTasks);
+                await RefreshAllAsync(PeerEndpointKind.Gateway);
+            }
+
+            foreach (var server in Servers) StartServer(server);
+            SetStatus($"本地设备已刷新，当前在线 {Peers.Count} 台；服务器名单在后台独立更新。");
+        }
+        catch (OperationCanceledException) when (exiting) { }
+        finally { deviceRefreshGate.Release(); }
     }
 
     private async void AddGateway_Click(object sender, RoutedEventArgs e)
