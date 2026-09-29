@@ -60,7 +60,7 @@ internal static class Program
                 Require(help.Chapters.Select(c => c.Title).SequenceEqual(expected), "all modules and MCP have matching help chapters");
                 Require(help.Chapters.All(c => c.Steps.Count == 3 && c.Steps.All(s => !string.IsNullOrWhiteSpace(s.Screenshot)) && !string.IsNullOrWhiteSpace(c.Tip)),
                     "every chapter includes three screenshot steps and a note");
-                Require(help.Chapters.Last().Tools?.Count == 12, "MCP chapter documents every current tool");
+                Require(help.Chapters.Last().Tools?.Count == 38, "MCP chapter documents every current tool");
                 var aiChapter = help.Chapters.Last();
                 Require(aiChapter.AiSetupPrompt?.Contains("resource-manager/SKILL.md") == true &&
                     aiChapter.AiSetupPrompt.Contains("--mcp") && aiChapter.AiSetupPrompt.Contains("resource_manager_status"),

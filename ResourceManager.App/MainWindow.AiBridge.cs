@@ -75,19 +75,32 @@ public partial class MainWindow
                 {
                     var query = Optional(args, "query", 100);
                     var kind = ResourceKindFilter(args);
+                    var source = Optional(args, "source", 20);
+                    var serverId = Optional(args, "serverId", 100);
+                    var deviceId = Optional(args, "deviceId", 100);
+                    if (source is not null && !source.Equals("device", StringComparison.OrdinalIgnoreCase) &&
+                        !source.Equals("server", StringComparison.OrdinalIgnoreCase))
+                        return new(false, "invalid_source");
+                    if (serverId is not null && (source?.Equals("device", StringComparison.OrdinalIgnoreCase) == true ||
+                        Servers.All(row => row.Binding.Id != serverId)))
+                        return new(false, "invalid_server_filter");
                     var min = OptionalLong(args, "minSizeBytes");
                     var max = OptionalLong(args, "maxSizeBytes");
                     if (min < 0 || max < 0 || min is not null && max is not null && min > max)
                         return new(false, "invalid_size_range");
                     var limit = Limit(args, 100);
                     var found = new List<object>();
-                    foreach (var peer in Peers.Where(row => row.Status == "在线"))
+                    foreach (var peer in Peers.Where(row => row.Status == "在线" && serverId is null &&
+                        source?.Equals("server", StringComparison.OrdinalIgnoreCase) != true &&
+                        (deviceId is null || row.Peer.DeviceId == deviceId)))
                         if (peerCatalogs.TryGetValue(peer.Peer.DeviceId, out var items))
                             found.AddRange(items.Where(item => Matches(item, query, kind, min, max))
                                 .Select(item => (object)new { source = "device", deviceId = peer.Peer.DeviceId,
                                     deviceName = peer.Peer.Nickname, resource = ResourceInfo(item) }));
-                    foreach (var server in Servers.Where(row => row.Status == "在线"))
-                        foreach (var catalog in server.Catalogs)
+                    foreach (var server in Servers.Where(row => row.Status == "在线" &&
+                        source?.Equals("device", StringComparison.OrdinalIgnoreCase) != true &&
+                        (serverId is null || row.Binding.Id == serverId)))
+                        foreach (var catalog in server.Catalogs.Where(item => deviceId is null || item.Owner == deviceId))
                         {
                             var owner = server.Members.FirstOrDefault(member => member.DeviceId == catalog.Owner);
                             found.AddRange(catalog.Catalog.Resources.Where(item => Matches(item, query, kind, min, max))
@@ -176,7 +189,7 @@ public partial class MainWindow
                         note = "消息已加入本机队列；离线设备恢复连接后自动重试。" });
                 }
                 default:
-                    return new(false, "unsupported_command");
+                    return await HandleAdditionalAiBridgeAsync(request, token);
             }
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)

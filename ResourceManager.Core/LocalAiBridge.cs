@@ -17,7 +17,13 @@ public sealed class LocalAiBridge : IDisposable, IAsyncDisposable
     private static readonly HashSet<string> Commands =
     [
         "status", "list_devices", "refresh_devices", "list_device_resources", "search_resources",
-        "list_publications", "publish", "get_publication_operation", "list_conversations", "list_messages", "send_message", "send_resource_card"
+        "list_publications", "publish", "get_publication_operation", "list_conversations", "list_messages", "send_message", "send_resource_card",
+        "list_servers", "list_server_resources", "list_downloads", "download_resource", "pause_download", "resume_download",
+        "list_favorites", "add_favorite", "remove_favorite", "set_publication_note", "move_publication",
+        "set_group_permission", "set_server_publication", "revoke_publication", "list_uploads",
+        "upload_to_server", "pause_upload", "resume_upload", "set_stored_permission", "delete_stored_resource",
+        "mute_conversation", "retry_message", "send_private_resource", "get_private_resource_operation",
+        "check_updates", "get_update_status"
     ];
     private readonly CancellationTokenSource cancellation = new();
     private readonly Task listener;
@@ -118,18 +124,19 @@ public sealed class LocalAiBridgeClient
                 throw new InvalidOperationException("ResourceManager 客户端版本不支持 MCP，或本机通道暂不可用。", ex);
             }
         }
-        var available = new List<int>();
-        foreach (var target in targets)
+        async Task<int?> ProbeAsync(int target)
         {
             try
             {
                 var status = await SendAsync(target, "status", null, TimeSpan.FromSeconds(3), token);
-                if (status.GetProperty("success").GetBoolean()) available.Add(target);
+                return status.GetProperty("success").GetBoolean() ? target : null;
             }
-            catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException or OperationCanceledException && !token.IsCancellationRequested) { }
+            catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException or
+                OperationCanceledException && !token.IsCancellationRequested) { return null; }
         }
-        if (available.Count == 0) throw new InvalidOperationException("ResourceManager 客户端未运行或版本不支持 MCP。请先启动新版客户端。");
-        if (available.Count != 1) throw new InvalidOperationException("检测到多个 ResourceManager 实例；请设置 RESOURCEMANAGER_CLIENT_PID 指定目标。");
+        var available = (await Task.WhenAll(targets.Select(ProbeAsync))).OfType<int>().ToArray();
+        if (available.Length == 0) throw new InvalidOperationException("ResourceManager 客户端未运行或版本不支持 MCP。请先启动新版客户端。");
+        if (available.Length != 1) throw new InvalidOperationException("检测到多个 ResourceManager 实例；请设置 RESOURCEMANAGER_CLIENT_PID 指定目标。");
         return Data(await SendAsync(available[0], command, arguments, TimeSpan.FromMinutes(2), token));
     }
 

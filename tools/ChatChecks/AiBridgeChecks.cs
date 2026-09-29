@@ -22,6 +22,11 @@ internal static partial class Program
             minSizeBytes = (long?)null, maxSizeBytes = (long?)null, limit = 10 });
         Require(search.Success && Data(search).GetProperty("total").GetInt32() == 0,
             "MCP resource search returns an empty filtered snapshot");
+        Require(!(await Call("search_resources", new { source = "server", serverId = "unbound" })).Success,
+            "MCP search rejects an unbound server filter");
+        var scopedSearch = await Call("search_resources", new { source = "device", deviceId = "absent-device" });
+        Require(scopedSearch.Success && Data(scopedSearch).GetProperty("total").GetInt32() == 0,
+            "MCP search scopes results to the requested device");
 
         var source = Path.Combine(store.DataDirectory, "mcp-publish-check.txt");
         await File.WriteAllTextAsync(source, "isolated MCP publication");
@@ -47,7 +52,44 @@ internal static partial class Program
             .Any(item => item.GetProperty("id").GetString() == publicationId),
             "MCP reads back the new publication");
 
-        store.SavePeerCapabilities("peer", [NodeDefaults.ChatCapability]);
+        var servers = await Call("list_servers");
+        Require(servers.Success && Data(servers).GetProperty("servers").GetArrayLength() == 0,
+            "MCP lists bound servers without creating a connection");
+        var downloads = await Call("list_downloads");
+        Require(downloads.Success && Data(downloads).GetProperty("downloads").GetArrayLength() == 0,
+            "MCP lists download jobs without opening the downloads tab");
+        Require(!(await Call("download_resource", new { source = "device", deviceId = "peer",
+            resourceId = "missing", targetDirectory = "relative" })).Success,
+            "MCP refuses a download destination that is not an existing absolute directory");
+        var favorites = await Call("list_favorites");
+        Require(favorites.Success && Data(favorites).GetProperty("total").GetInt32() ==
+            store.GetFavorites().Count + store.GetServerFavorites().Count,
+            "MCP lists favorites from isolated storage");
+        var noted = await Call("set_publication_note", new { resourceId = publicationId, note = "MCP 备注" });
+        Require(noted.Success && store.GetResource(publicationId!)!.Note == "MCP 备注",
+            "MCP updates publication metadata");
+        var group = store.SaveResourceGroup("MCP 隔离组");
+        var moved = await Call("move_publication", new { resourceId = publicationId, groupId = group.Id });
+        Require(moved.Success && store.GetResource(publicationId!)!.GroupId == group.Id,
+            "MCP moves a publication into an existing group");
+        var permission = await Call("set_group_permission", new { groupId = group.Id,
+            access = "Private", allowedDeviceIds = Array.Empty<string>() });
+        Require(permission.Success && store.GetEffectiveGroupPermission(group.Id).Access == GroupAccess.Private,
+            "MCP changes group visibility in the isolated store");
+        Require(!(await Call("set_server_publication", new { serverId = "missing", kind = "resource",
+            id = publicationId, enabled = true })).Success,
+            "MCP cannot publish to an unbound server");
+        var uploads = await Call("list_uploads");
+        Require(uploads.Success && Data(uploads).GetProperty("total").GetInt32() == 0,
+            "MCP lists server upload jobs without using a picker");
+        Require(!(await Call("upload_to_server", new { serverId = "missing", path = source,
+            access = "Public" })).Success,
+            "MCP cannot upload to an unbound server");
+        var updateStatus = await Call("get_update_status");
+        Require(updateStatus.Success && Data(updateStatus).TryGetProperty("currentVersion", out _),
+            "MCP exposes update state without starting an installation");
+
+        store.SavePeerCapabilities("peer", [NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
         var before = store.GetChatMessages("peer").Count;
         var card = await Call("send_resource_card", new { deviceId = "peer", resourceId = publicationId });
         Require(card.Success && store.GetChatMessages("peer").Count == before + 1 &&
@@ -62,5 +104,27 @@ internal static partial class Program
             "MCP reads the latest message without a UI action");
         Require(!(await Call("send_message", new { deviceId = "unknown", text = "not delivered" })).Success,
             "MCP cannot send to an unknown device");
+        var muted = await Call("mute_conversation", new { deviceId = "peer", minutes = 5 });
+        Require(muted.Success && store.GetChatConversations().First(item => item.PeerId == "peer").MutedUntilUtc is not null,
+            "MCP mutes a known conversation");
+        Require(!(await Call("retry_message", new { deviceId = "peer", messageId = "missing" })).Success,
+            "MCP refuses to retry a message that did not fail");
+        var privateSend = await Call("send_private_resource", new { deviceId = "peer", path = source });
+        var privateOperationId = Data(privateSend).GetProperty("operationId").GetString();
+        Require(privateSend.Success && privateOperationId is not null,
+            "MCP prepares a private resource in the background");
+        AiBridgeResponse privateStatus = null!;
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            privateStatus = await Call("get_private_resource_operation", new { operationId = privateOperationId });
+            if (Data(privateStatus).GetProperty("state").GetString() != "Running") break;
+            await Task.Delay(20);
+        }
+        Require(privateStatus.Success && Data(privateStatus).GetProperty("state").GetString() == "Completed" &&
+            store.GetChatMessages("peer").Any(item => item.Kind == "PrivateResource"),
+            "MCP queues a private copy after completing its preparation operation");
+        var revoked = await Call("revoke_publication", new { resourceId = publicationId });
+        Require(revoked.Success && store.GetResource(publicationId!) is null && File.Exists(source),
+            "MCP revokes a reference publication while preserving its original file");
     }
 }
