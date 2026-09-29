@@ -1,11 +1,11 @@
 # ResourceManager Android 架构审查包
 
 - 文档版本：D1，2026-09-29。
-- 状态：设计草案，待独立评审；不是已实现功能或已验证架构。
+- 状态：保留 D1 设计基线；用户在独立审查工具无法连接后授权直接实施，Android 0.1.0 测试版已进入交付。实际实现和验证以[实施记录](../../../ResourceManager.Android/validation.md)为准。
 - 代码基线：`434442b8fbdeb65bb8ff5368273fd1a5d6f6ac5a`，Windows 客户端 0.7.4。
 - 分支：`codex/git-collaboration`。
 - 需求来源：本机反馈服务端“开发手机版”，Issue `7fee3e9fb3ae4ad3a39b740493bb80db`。
-- 2026-09-29 读取该 Issue 的状态为 `PendingReview`。本次编写方案不改变状态，不代表开始开发。
+- 编写 D1 时 Issue 为 `PendingReview`；接手实现后已通过服务端接口更新为 `Accepted`。状态交付时另外同步，不能以本地文档代替服务端状态。
 
 ## 阅读顺序
 
@@ -40,4 +40,4 @@
 
 ## 本轮实际完成范围
 
-仅创建本目录的设计文档。没有 Android 工程、APK、协议样机、真机或模拟器运行结果；未安装 Android 工具链，未修改 Windows/服务端运行逻辑。文档中的验证项目均为未来计划。
+D1 提交仅包含设计文档。后续实现新增 `ResourceManager.Android/`、构建脚本与双向互通测试，已有可安装 APK 和 API 36 无窗口模拟器运行结果；没有改变 Windows/服务端生产运行逻辑。请结合[客户端说明](../../../ResourceManager.Android/README.md)与[实施记录](../../../ResourceManager.Android/validation.md)区分已验证能力和仍待真实手机反馈的部分。

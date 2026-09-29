@@ -9,6 +9,13 @@ TestResults/
 *.suo
 *.log
 resources.db*
+.tools/
+**/.gradle/
+**/.kotlin/
+ResourceManager.Android/**/build/
+ResourceManager.Android/local.properties
+*.jks
+*.keystore
 
 # Git authentication and signing material stays on the developer machine.
 .git-auth.local.json
