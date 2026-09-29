@@ -91,3 +91,58 @@ public sealed class LocalControlTests
         return JsonDocument.Parse(line!).RootElement.Clone();
     }
 }
+
+public sealed class LocalAiBridgeTests
+{
+    [Fact]
+    public async Task ClientUsesCurrentUserPipeAndReportsHandlerErrors()
+    {
+        await using var server = new LocalAiBridge((request, _) =>
+            Task.FromResult(request.Command == "status"
+                ? new AiBridgeResponse(true, Data: new { ready = true })
+                : new AiBridgeResponse(false, "not_allowed")));
+        var client = new LocalAiBridgeClient(Environment.ProcessId);
+        Assert.True((await client.CallAsync("status")).GetProperty("ready").GetBoolean());
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => client.CallAsync("publish"));
+        Assert.Equal("not_allowed", error.Message);
+    }
+
+    [Fact]
+    public async Task AiPipeValidatesCommandsAndRecoversAfterInvalidInput()
+    {
+        var name = "ResourceManager.Tests.Ai." + Guid.NewGuid().ToString("N");
+        var calls = new List<string>();
+        await using var server = new LocalAiBridge((request, _) =>
+        {
+            calls.Add(request.Command);
+            return Task.FromResult(new AiBridgeResponse(true, Data: new { value = request.Command }));
+        }, name);
+        var good = await Send(new { protocol = 1, command = "list_devices", processId = Environment.ProcessId, arguments = new { } });
+        Assert.True(good.GetProperty("success").GetBoolean());
+        Assert.Equal("list_devices", good.GetProperty("data").GetProperty("value").GetString());
+        foreach (var bad in new[]
+        {
+            new { protocol = 2, command = "list_devices", processId = Environment.ProcessId, arguments = new { } },
+            new { protocol = 1, command = "list_devices", processId = -1, arguments = new { } },
+            new { protocol = 1, command = "execute", processId = Environment.ProcessId, arguments = new { } }
+        }) Assert.False((await Send(bad)).GetProperty("success").GetBoolean());
+        Assert.False((await SendText("{broken")).GetProperty("success").GetBoolean());
+        Assert.False((await SendText(new string('x', LocalAiBridge.MaxRequestCharacters + 1))).GetProperty("success").GetBoolean());
+        Assert.Single(calls);
+        Assert.True((await Send(new { protocol = 1, command = "status", processId = Environment.ProcessId, arguments = new { } }))
+            .GetProperty("success").GetBoolean());
+
+        Task<JsonElement> Send(object request) => SendText(JsonSerializer.Serialize(request, LocalAiBridge.Json));
+        async Task<JsonElement> SendText(string payload)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            await using var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
+            await pipe.ConnectAsync(timeout.Token);
+            using var reader = new StreamReader(pipe, Encoding.UTF8, false, 1024, true);
+            await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, true);
+            await writer.WriteLineAsync(payload.AsMemory(), timeout.Token);
+            await writer.FlushAsync(timeout.Token);
+            return JsonDocument.Parse((await reader.ReadLineAsync(timeout.Token))!).RootElement.Clone();
+        }
+    }
+}

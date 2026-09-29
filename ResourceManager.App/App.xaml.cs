@@ -11,6 +11,7 @@ public partial class App : System.Windows.Application
 {
     private SingleInstanceCoordinator? singleInstance;
     private LocalControlServer? localControl;
+    private LocalAiBridge? localAiBridge;
 
     public App()
     {
@@ -32,6 +33,12 @@ public partial class App : System.Windows.Application
 
     private async void App_Startup(object sender, StartupEventArgs e)
     {
+        if (e.Args.Length == 1 && e.Args[0] == "--mcp")
+        {
+            try { await ResourceManagerMcpHost.RunAsync(); Shutdown(); }
+            catch (Exception ex) { AppLog.Write("MCP 进程运行失败", ex); Shutdown(8); }
+            return;
+        }
         var background = e.Args.Contains("--background", StringComparer.OrdinalIgnoreCase);
         try
         {
@@ -94,12 +101,14 @@ public partial class App : System.Windows.Application
         MainWindow = window;
         singleInstance.StartListening(() => Dispatcher.BeginInvoke(window.ShowWindow));
         localControl = new LocalControlServer(window.HandleLocalControlAsync);
+        localAiBridge = new LocalAiBridge(window.HandleAiBridgeAsync);
         window.Show();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         localControl?.Dispose();
+        localAiBridge?.Dispose();
         singleInstance?.Dispose();
         base.OnExit(e);
     }

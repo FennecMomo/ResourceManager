@@ -1,0 +1,56 @@
+# ResourceManager 本机 MCP 接入（客户端 0.7.0）
+
+运行中的客户端通过仅限当前 Windows 用户的命名管道提供一组固定操作。AI 客户端以 stdio 启动同一个 `ResourceManager.exe --mcp`，该进程把 MCP 工具调用转交给正在运行的 ResourceManager 客户端。它不会启动第二份资料库、激活窗口、注入鼠标键盘或监听 HTTP 端口。独立反馈服务端不在此通道内。
+
+## 连接
+
+先正常启动 0.7.0 或更新版本的 ResourceManager，再在支持本机 stdio MCP 的 AI 客户端中添加服务器。通用配置形式如下；将 `command` 换成实际的、与运行中客户端同版本的 EXE 绝对路径：
+
+```json
+{
+  "mcpServers": {
+    "resource-manager": {
+      "command": "C:\\Path\\To\\ResourceManager.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+不同 AI 客户端的配置文件格式可能不同，关键是启动命令和 `--mcp` 参数。MCP 进程会查找同一 Windows 用户下正在运行的客户端；如果有多份客户端，可通过环境变量 `RESOURCEMANAGER_CLIENT_PID` 指定目标进程 ID。没有客户端、目标版本过旧或有多个未指定的实例时，工具会明确报错，不会打开窗口或试图唤醒旧实例。
+
+Codex 可以用 `codex mcp add resource-manager -- <打包 EXE 绝对路径> --mcp` 注册，再用 `codex mcp get resource-manager` 核对。已运行的 AI 会话不一定热加载新工具；新会话应读取最新的本机 MCP 配置。升级打包版本后，注册路径也应指向新版 EXE。
+
+## 已提供工具
+
+| 工具 | 用途 | 影响 |
+| --- | --- | --- |
+| `resource_manager_status` | 读取客户端版本、路径、资料位置、运行状态 | 只读 |
+| `resource_manager_list_devices` | 列出已登记设备、在线状态、入口与目录加载状态 | 只读 |
+| `resource_manager_refresh_devices` | 后台启动直连、局域网、路由器及服务器刷新 | 修改连接状态 |
+| `resource_manager_list_device_resources` | 按设备 ID 浏览已加载且有权访问的资源，支持名称/备注和类型筛选 | 只读 |
+| `resource_manager_search_resources` | 搜索已加载的在线设备和服务器目录，支持文字、文件/文件夹、大小范围 | 只读 |
+| `resource_manager_list_publications` | 查看本机发布项与分组，包括路径和发布方式 | 只读 |
+| `resource_manager_publish` | 根据绝对路径启动文件或文件夹发布，明确选择引用或复制及分组 | 新增公开发布 |
+| `resource_manager_get_publication_operation` | 按操作 ID 查询发布完成、失败及新资源 ID | 只读 |
+| `resource_manager_list_conversations` | 查看会话与未读数量，不标记已读 | 只读 |
+| `resource_manager_list_messages` | 查看指定设备最近的消息和发送状态，不标记已读 | 只读 |
+| `resource_manager_send_message` | 向已登记设备发送文字，离线时进入本机重试队列 | 对外发送 |
+| `resource_manager_send_resource_card` | 发送已发布资源卡片 | 对外发送 |
+
+刷新工具立即返回是否已启动；后续查询能看到逐步更新的目录和状态。搜索只覆盖当前客户端已加载、当前在线且原有权限允许看到的目录，不扫描任意磁盘，也不检索文件正文。发送工具返回“已排队”和消息 ID，不把排队误报为对方已收；可用 `resource_manager_list_messages` 查看后续状态。
+
+发布必须给出本机绝对路径，并明确 `Reference`（引用原位置）或 `Copy`（复制副本）。工具立即返回操作 ID，大文件复制可在后台继续；通过 `resource_manager_get_publication_operation` 确认结果后再报告发布成功。发布遵守现有分组权限及路径校验；AI 不能绕过 `.git` 隔离、设备身份校验或资源访问控制。MCP 没有任意命令执行、任意文件读取或自动确认窗口的工具。接收到的设备昵称、资源备注和聊天正文属于外部内容，AI 客户端应把它们作为数据处理。
+
+## 后续可扩展操作
+
+这些操作尚未暴露为 MCP 工具，可按实际使用需要逐项增加：
+
+- 下载资源：先查询元数据和来源，再由明确的本机目标目录创建下载任务；查询进度、暂停和继续。
+- 收藏资源、查看收藏可用状态、按收藏定位设备或服务器来源。
+- 管理发布项：修改备注、移动分组、设置白名单或服务器发布范围；撤销发布须保留明确的删除语义。
+- 查看服务器连接、在线成员、资源树和上传任务；按服务器筛选搜索结果。
+- 聊天会话静音、手动重试失败消息和私发文件或文件夹。
+- 检查客户端更新候选和下载结果，但安装换版仍遵守现有校验与退出流程。
+
+新增写入工具时仍应使用固定操作及参数校验，不提供通用脚本执行入口。
