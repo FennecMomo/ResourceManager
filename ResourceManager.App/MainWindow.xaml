@@ -387,15 +387,18 @@
             <Grid.RowDefinitions><RowDefinition Height="92"/><RowDefinition Height="*"/><RowDefinition Height="46"/></Grid.RowDefinitions>
             <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
                 <Grid Margin="28,0">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock x:Name="PageTitleText" Text="设备" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource Ink}"/>
                         <TextBlock x:Name="PageSubtitleText" Text="连接同事的电脑，浏览他们分享的资源" Style="{StaticResource Caption}" Margin="0,3,0,0"/>
                     </StackPanel>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
-                        <TextBlock x:Name="IdentityText" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Ink}" TextAlignment="Right"/>
-                        <TextBlock x:Name="AddressText" Style="{StaticResource Caption}" TextAlignment="Right" Margin="0,3,0,0"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right" MaxWidth="260">
+                        <TextBlock x:Name="IdentityText" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Ink}" TextAlignment="Right" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="AddressText" Style="{StaticResource Caption}" TextAlignment="Right" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
                     </StackPanel>
+                    <Button x:Name="HelpButton" Grid.Column="2" Content="帮助" Click="Help_Click" Style="{StaticResource SecondaryButton}"
+                            Width="70" Height="34" Padding="10,0" Margin="22,0,0,0" VerticalAlignment="Center"
+                            ToolTip="打开使用帮助" AutomationProperties.Name="打开使用帮助"/>
                 </Grid>
             </Border>
 

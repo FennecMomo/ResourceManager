@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("ResourceManager.NotificationChecks")]
 [assembly: InternalsVisibleTo("ResourceManager.PublicationChecks")]
 [assembly: InternalsVisibleTo("ResourceManager.ServerChecks")]
+[assembly: InternalsVisibleTo("ResourceManager.HelpChecks")]
 
 [assembly:ThemeInfo(
     ResourceDictionaryLocation.None,            //where theme specific resource dictionaries are located
