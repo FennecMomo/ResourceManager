@@ -10,6 +10,8 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.6" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
+    <EmbeddedResource Include="..\tools\delta\xdelta3.exe" LogicalName="ResourceManager.Xdelta3.exe" />
+    <EmbeddedResource Include="..\tools\delta\LICENSE" LogicalName="ResourceManager.Xdelta3.LICENSE" />
   </ItemGroup>
 
 </Project>

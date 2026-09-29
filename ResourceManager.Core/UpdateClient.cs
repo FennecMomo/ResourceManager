@@ -5,13 +5,15 @@ using System.Text.RegularExpressions;
 
 namespace ResourceManager.Core;
 
-public sealed record AppUpdate(Version Version, long Size, string Sha256, Uri DownloadUrl, Uri ReleaseUrl);
+public sealed record AppUpdate(Version Version, long Size, string Sha256, Uri DownloadUrl, Uri ReleaseUrl,
+    Uri? DeltaManifestUrl = null, long DeltaManifestSize = 0, string? DeltaManifestSha256 = null);
 
-public sealed class UpdateClient : IDisposable
+public sealed partial class UpdateClient : IDisposable
 {
     public static readonly Uri LatestReleaseUrl = new("https://api.github.com/repos/FennecMomo/ResourceManager/releases/latest");
     public const long MaxPackageBytes = 1024L * 1024 * 1024;
     private const int MaxMetadataBytes = 256 * 1024;
+    private const int MaxDeltaManifestBytes = 16 * 1024;
     private readonly HttpClient http;
     private readonly bool ownsHttp;
     private readonly string updateDirectory;
@@ -71,16 +73,44 @@ public sealed class UpdateClient : IDisposable
         var expectedUrl = new Uri($"https://github.com/FennecMomo/ResourceManager/releases/download/{tag}/ResourceManager.exe");
         var actualUrl = new Uri(asset.GetProperty("browser_download_url").GetString() ?? "", UriKind.Absolute);
         if (actualUrl != expectedUrl) throw new InvalidDataException("更新包下载地址无效。");
+        var manifest = root.GetProperty("assets").EnumerateArray()
+            .FirstOrDefault(item => item.GetProperty("name").GetString() == "ResourceManager-delta.json");
+        Uri? manifestUrl = null;
+        long manifestSize = 0;
+        string? manifestHash = null;
+        if (manifest.ValueKind != JsonValueKind.Undefined)
+        {
+            manifestSize = manifest.TryGetProperty("size", out var manifestSizeValue) &&
+                manifestSizeValue.ValueKind == JsonValueKind.Number &&
+                manifestSizeValue.TryGetInt64(out var parsedManifestSize) ? parsedManifestSize : 0;
+            manifestHash = manifest.TryGetProperty("digest", out var manifestDigestValue) &&
+                manifestDigestValue.ValueKind == JsonValueKind.String
+                ? manifestDigestValue.GetString() : null;
+            var expectedManifestUrl = new Uri($"https://github.com/FennecMomo/ResourceManager/releases/download/{tag}/ResourceManager-delta.json");
+            if (manifestSize is > 0 and <= MaxDeltaManifestBytes &&
+                manifestHash is not null && Regex.IsMatch(manifestHash, "^sha256:[0-9a-fA-F]{64}$") &&
+                manifest.TryGetProperty("browser_download_url", out var manifestUrlValue) &&
+                manifestUrlValue.ValueKind == JsonValueKind.String &&
+                Uri.TryCreate(manifestUrlValue.GetString(), UriKind.Absolute, out var actualManifestUrl) &&
+                actualManifestUrl == expectedManifestUrl)
+            {
+                manifestUrl = expectedManifestUrl;
+                manifestHash = manifestHash[7..].ToLowerInvariant();
+            }
+            else { manifestSize = 0; manifestHash = null; }
+        }
         return new AppUpdate(version, size, digest[7..].ToLowerInvariant(), expectedUrl,
-            new Uri($"https://github.com/FennecMomo/ResourceManager/releases/tag/{tag}"));
+            new Uri($"https://github.com/FennecMomo/ResourceManager/releases/tag/{tag}"),
+            manifestUrl, manifestSize, manifestHash);
     }
 
     public async Task<string> DownloadAsync(AppUpdate update, IProgress<long>? progress = null, CancellationToken cancellationToken = default)
     {
         return await DownloadPackageAsync(update.Version, update.Size, update.Sha256,
-            async token =>
+            async (offset, token) =>
             {
                 using var request = CreateRequest(update.DownloadUrl);
+                if (offset > 0) request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(offset, null);
                 return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token)
                     .ConfigureAwait(false);
             }, progress, cancellationToken).ConfigureAwait(false);
@@ -93,59 +123,102 @@ public sealed class UpdateClient : IDisposable
             throw new InvalidDataException("本地更新源的资源编号无效。");
         var version = ParseVersion(update.Version);
         return await DownloadPackageAsync(version, update.Size, update.Sha256,
-            token => peerClient.OpenFileAsync(peer, update.ResourceId, "", 0, null, token),
+            (offset, token) => peerClient.OpenFileAsync(peer, update.ResourceId, "", offset, null, token),
             progress, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<string> DownloadPackageAsync(Version version, long size, string sha256,
-        Func<CancellationToken, Task<HttpResponseMessage>> openResponse,
+        Func<long, CancellationToken, Task<HttpResponseMessage>> openResponse,
         IProgress<long>? progress, CancellationToken cancellationToken)
+    {
+        ValidateBlobMetadata(size, sha256);
+        var destination = Path.Combine(updateDirectory, $"ResourceManager-{version}-{sha256[..12]}.exe");
+        return await DownloadVerifiedAsync(destination, size, sha256, openResponse, progress,
+            requireExecutable: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void ValidateBlobMetadata(long size, string sha256)
     {
         if (size is <= 0 or > MaxPackageBytes) throw new InvalidDataException("更新包大小无效。");
         if (!Regex.IsMatch(sha256, "^[0-9a-fA-F]{64}$")) throw new InvalidDataException("更新包校验值无效。");
+    }
+
+    private async Task<string> DownloadVerifiedAsync(string destination, long size, string sha256,
+        Func<long, CancellationToken, Task<HttpResponseMessage>> openResponse,
+        IProgress<long>? progress, bool requireExecutable, CancellationToken token)
+    {
+        ValidateBlobMetadata(size, sha256);
         sha256 = sha256.ToLowerInvariant();
         Directory.CreateDirectory(updateDirectory);
-        var destination = Path.Combine(updateDirectory, $"ResourceManager-{version}-{sha256[..12]}.exe");
-        if (File.Exists(destination) && new FileInfo(destination).Length == size &&
-            await HashFileAsync(destination, cancellationToken) == sha256)
-            return destination;
-
-        var temporary = Path.Combine(updateDirectory, Guid.NewGuid().ToString("N") + ".download");
-        StorageLocation.EnsureSpace(updateDirectory, size);
-        try
+        if (File.Exists(destination))
         {
-            using var response = await openResponse(cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength is long contentLength && contentLength != size)
-                throw new InvalidDataException("更新包大小与发布资料不符。");
-            await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
-            await using var target = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            if (new FileInfo(destination).Length == size && await HashFileAsync(destination, token) == sha256)
+                return destination;
+            File.Delete(destination);
+        }
+        var temporary = destination + ".download";
+        var offset = File.Exists(temporary) ? new FileInfo(temporary).Length : 0;
+        if (offset > size) { File.Delete(temporary); offset = 0; }
+        if (offset == size)
+        {
+            if (await HashFileAsync(temporary, token) == sha256)
+            {
+                try { VerifyExecutableHeader(temporary, requireExecutable); }
+                catch (InvalidDataException) { File.Delete(temporary); throw; }
+                File.Move(temporary, destination, true);
+                return destination;
+            }
+            File.Delete(temporary);
+            offset = 0;
+        }
+        StorageLocation.EnsureSpace(updateDirectory, size - offset);
+        using var response = await openResponse(offset, token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        if (offset > 0 && response.StatusCode == HttpStatusCode.OK) offset = 0;
+        else if (offset > 0 && (response.StatusCode != HttpStatusCode.PartialContent ||
+                 response.Content.Headers.ContentRange?.From != offset ||
+                 response.Content.Headers.ContentRange?.Length != size))
+        {
+            File.Delete(temporary);
+            throw new InvalidDataException("更新源返回的续传范围无效。");
+        }
+        if (response.Content.Headers.ContentLength is long contentLength && contentLength != size - offset)
+            throw new InvalidDataException("更新包大小与发布资料不符。");
+        await using var source = await response.Content.ReadAsStreamAsync(token);
+        await using (var target = new FileStream(temporary, offset == 0 ? FileMode.Create : FileMode.Append,
+            FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
             var chunk = new byte[1024 * 1024];
-            long written = 0;
+            var written = offset;
+            progress?.Report(written);
             int read;
-            while ((read = await source.ReadAsync(chunk, cancellationToken)) != 0)
+            while ((read = await source.ReadAsync(chunk, token)) != 0)
             {
                 written += read;
                 if (written > size) throw new InvalidDataException("更新包超过预期大小。");
-                hash.AppendData(chunk, 0, read);
-                await target.WriteAsync(chunk.AsMemory(0, read), cancellationToken);
+                await target.WriteAsync(chunk.AsMemory(0, read), token);
                 progress?.Report(written);
             }
-            await target.FlushAsync(cancellationToken);
-            if (written != size || Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant() != sha256)
-                throw new InvalidDataException("更新包校验失败，未安装更新。");
-            await target.DisposeAsync();
-            await using (var check = File.OpenRead(temporary))
-            {
-                if (check.ReadByte() != 'M' || check.ReadByte() != 'Z')
-                    throw new InvalidDataException("下载内容不是 Windows 程序。");
-            }
-            File.Move(temporary, destination, true);
-            return destination;
+            await target.FlushAsync(token);
+            if (written != size) throw new InvalidDataException("更新包下载不完整，可在下次继续。");
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        if (await HashFileAsync(temporary, token) != sha256)
+        {
+            File.Delete(temporary);
+            throw new InvalidDataException("更新包校验失败，未安装更新。");
+        }
+        try { VerifyExecutableHeader(temporary, requireExecutable); }
+        catch (InvalidDataException) { File.Delete(temporary); throw; }
+        File.Move(temporary, destination, true);
+        return destination;
+    }
+
+    private static void VerifyExecutableHeader(string path, bool required)
+    {
+        if (!required) return;
+        using var check = File.OpenRead(path);
+        if (check.ReadByte() != 'M' || check.ReadByte() != 'Z')
+            throw new InvalidDataException("下载内容不是 Windows 程序。");
     }
 
     public void CleanupOldDownloads()
@@ -153,16 +226,24 @@ public sealed class UpdateClient : IDisposable
         if (!Directory.Exists(updateDirectory)) return;
         foreach (var path in Directory.EnumerateFiles(updateDirectory, "ResourceManager-*.exe"))
             try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-        foreach (var path in Directory.EnumerateFiles(updateDirectory, "*.download"))
+        foreach (var path in Directory.EnumerateFiles(updateDirectory, "ResourceManager-*.xdelta"))
             try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        foreach (var path in Directory.EnumerateFiles(updateDirectory, "*.reconstructed"))
+            try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        foreach (var path in Directory.EnumerateFiles(updateDirectory, "*.download"))
+            try { if (File.GetLastWriteTimeUtc(path) < DateTime.UtcNow.AddDays(-7)) File.Delete(path); }
+            catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     private static HttpRequestMessage CreateRequest(Uri uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.UserAgent.ParseAdd("ResourceManager/1.0");
-        request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true };
-        if (uri == LatestReleaseUrl) request.Headers.Accept.ParseAdd("application/vnd.github+json");
+        if (uri == LatestReleaseUrl)
+        {
+            request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true };
+            request.Headers.Accept.ParseAdd("application/vnd.github+json");
+        }
         return request;
     }
 

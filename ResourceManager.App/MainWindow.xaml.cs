@@ -58,6 +58,9 @@ public partial class MainWindow : Window
     private DateTimeOffset nextAutomaticDiscovery = DateTimeOffset.MinValue;
     private bool exiting;
     private bool checkingUpdate;
+    private string? updateProgressKey;
+    private DateTimeOffset updateProgressStarted;
+    private long updateProgressStartBytes;
     private bool startupUpdateCheckStarted;
     private bool restartAfterUpdate;
     private StagedUpdate? stagedUpdate;
@@ -1416,9 +1419,27 @@ public partial class MainWindow : Window
             SetSidebarUpdateState(UpdateIndicatorState.Downloading, latestVersion);
             var progress = new Progress<long>(bytes => UpdateDownloadProgress(sourceName, latestVersion,
                 bytes, localSource?.Package.Size ?? githubSource!.Size));
-            string package;
-            string packageHash;
-            if (localSource is not null)
+            string? package = null;
+            string? packageHash = null;
+            if (githubSource?.DeltaManifestUrl is not null && Environment.ProcessPath is { } currentExecutable)
+            {
+                var deltaProgress = new Progress<UpdateTransferProgress>(item =>
+                    UpdateDownloadProgress("GitHub", latestVersion, item.Bytes, item.Total, item.Method));
+                var attempt = await updateClient.TryDownloadDeltaAsync(githubSource, currentExecutable,
+                    current, deltaProgress, updateCancellation.Token);
+                if (attempt.Path is not null)
+                {
+                    package = attempt.Path;
+                    packageHash = githubSource.Sha256;
+                    sourceName = "GitHub 差分包";
+                }
+                else if (attempt.Reason is not null)
+                {
+                    AppLog.Write("差分更新不可用，改用完整包", new InvalidDataException(attempt.Reason));
+                    UpdateStatusText.Text = $"差分更新不可用，正尝试完整包…";
+                }
+            }
+            if (package is null && localSource is not null)
             {
                 try
                 {
@@ -1435,12 +1456,12 @@ public partial class MainWindow : Window
                     packageHash = githubSource.Sha256;
                 }
             }
-            else
+            else if (package is null)
             {
                 package = await updateClient.DownloadAsync(githubSource!, progress, updateCancellation.Token);
                 packageHash = githubSource!.Sha256;
             }
-            stagedUpdate = new StagedUpdate(package, packageHash, latestVersion.ToString());
+            stagedUpdate = new StagedUpdate(package, packageHash!, latestVersion.ToString());
             UpdateStatusText.Text = $"v{latestVersion} 已从{sourceName}下载并校验，退出后安装。";
             SetSidebarUpdateState(UpdateIndicatorState.Ready, latestVersion);
             if (manual && System.Windows.MessageBox.Show(
@@ -1474,12 +1495,25 @@ public partial class MainWindow : Window
         }
     }
 
-    private void UpdateDownloadProgress(string sourceName, Version version, long bytes, long size)
+    private void UpdateDownloadProgress(string sourceName, Version version, long bytes, long size,
+        string method = "完整更新")
     {
+        var key = $"{sourceName}|{version}|{method}";
+        if (updateProgressKey != key || bytes < updateProgressStartBytes)
+        {
+            updateProgressKey = key;
+            updateProgressStarted = DateTimeOffset.UtcNow;
+            updateProgressStartBytes = bytes;
+        }
         var percent = Math.Clamp(bytes * 100d / size, 0, 100);
-        UpdateStatusText.Text = $"正从{sourceName}下载 v{version} · {percent:0}%";
+        var elapsed = Math.Max((DateTimeOffset.UtcNow - updateProgressStarted).TotalSeconds, 0.1);
+        var bytesPerSecond = Math.Max(0, bytes - updateProgressStartBytes) / elapsed;
+        var speed = bytesPerSecond < 1024 ? "计算中" : $"{bytesPerSecond / 1048576d:0.0} MB/s";
+        var remaining = bytesPerSecond < 1024 ? "" :
+            $" · 预计剩余 {Math.Ceiling((size - bytes) / bytesPerSecond):0} 秒";
+        UpdateStatusText.Text = $"正从{sourceName}下载 v{version} {method} · {bytes / 1048576d:0.0}/{size / 1048576d:0.0} MB · {speed}{remaining}";
         SidebarUpdateTitleText.Text = $"正在下载 v{version}";
-        SidebarUpdateDetailText.Text = $"{percent:0}% · 下载完成后自动校验";
+        SidebarUpdateDetailText.Text = $"{method} {percent:0}% · {speed}";
     }
 
     private void ShowUpdateAvailableNotification(Version version)

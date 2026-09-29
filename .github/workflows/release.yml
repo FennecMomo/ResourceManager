@@ -41,11 +41,32 @@ jobs:
       - name: 构建 Windows x64 单文件程序
         run: dotnet publish ResourceManager.App/ResourceManager.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:ResourceManagerGitHubClientId=${{ vars.RESOURCE_MANAGER_GITHUB_CLIENT_ID }} -o dist/release
 
+      - name: 从上一正式版本生成并校验差分包
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          try {
+            ./tools/delta/create-release-patch.ps1 -Tag $env:GITHUB_REF_NAME -NewExecutable dist/release/ResourceManager.exe -OutputDirectory dist/release
+          } catch {
+            Write-Warning "差分包生成失败，本次只发布完整 EXE：$_"
+            Remove-Item -LiteralPath dist/release/ResourceManager-delta.json -ErrorAction SilentlyContinue
+            Get-ChildItem dist/release -Filter '*.xdelta' | Remove-Item -Force
+          }
+
       - name: 发布 GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME dist/release/ResourceManager.exe --title "ResourceManager $env:GITHUB_REF_NAME" --notes-from-tag --verify-tag
+        run: |
+          Copy-Item tools/delta/LICENSE dist/release/xdelta3-LICENSE.txt
+          $assets = @('dist/release/ResourceManager.exe')
+          $assets += 'dist/release/xdelta3-LICENSE.txt'
+          if (Test-Path dist/release/ResourceManager-delta.json) {
+            $assets += 'dist/release/ResourceManager-delta.json'
+            $assets += @(Get-ChildItem dist/release -Filter '*.xdelta' | Select-Object -ExpandProperty FullName)
+          }
+          gh release create $env:GITHUB_REF_NAME $assets --title "ResourceManager $env:GITHUB_REF_NAME" --notes-from-tag --verify-tag
 
   server-release:
     if: startsWith(github.ref_name, 'server-v')
