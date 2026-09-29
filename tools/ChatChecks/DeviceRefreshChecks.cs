@@ -34,7 +34,11 @@ internal static partial class Program
         var message = new ChatService(store, client).QueueText(peer.DeviceId, "离线仍保留");
         Task Refresh() => (Task)typeof(MainWindow).GetMethod("RefreshAllAsync", Private)!
             .Invoke(window, [null, false])!;
+        void RefreshView() => typeof(MainWindow).GetMethod("RefreshPeersView", Private)!.Invoke(window, null);
         var grid = (ListBox)window.FindName("PeersGrid");
+        RefreshView();
+        Require(window.Peers.Single(row => row.Peer.DeviceId == peer.DeviceId).Status == "未检查",
+            "saved peer is visible before startup refresh checks connectivity");
 
         using var stalled = new TcpListener(IPAddress.Loopback, 0);
         stalled.Start();
@@ -57,27 +61,41 @@ internal static partial class Program
         Require(window.RemoteResources.Any(row => row.Resource.Id == resource.Id), "online peer and resources appear after refresh");
         await node.StopAsync();
         await Refresh();
-        Require(window.Peers.All(row => row.Peer.DeviceId != peer.DeviceId), "refresh removes disconnected device row");
-        Require(grid.SelectedItem is null && window.RemoteResources.Count == 0 && window.RemoteResourceTree.Count == 0,
-            "lost selection clears resource list and tree");
+        Require(window.Peers.Single(row => row.Peer.DeviceId == peer.DeviceId).Status == "离线",
+            "refresh keeps disconnected device visible as offline");
+        Require((grid.SelectedItem as PeerRow)?.Peer.DeviceId == peer.DeviceId &&
+            window.RemoteResources.Count == 0 && window.RemoteResourceTree.Count == 0,
+            "offline selection remains while unavailable resources clear");
         Require(store.GetPeer(peer.DeviceId) is not null && store.GetPeerNote(peer.DeviceId) == "保留备注" &&
             store.GetFavorites().Any(f => f.PeerId == peer.DeviceId) && store.CanAccessGroup(group.Id, peer.DeviceId),
-            "automatic removal retains endpoints, notes, favorites and permissions");
+            "offline device retains endpoints, notes, favorites and permissions");
         Require(store.GetChatMessages(peer.DeviceId).Single().MessageId == message.MessageId &&
             store.GetChatMessages(peer.DeviceId).Single().State == "Queued" &&
             window.ChatConversations.Any(row => row.PeerId == peer.DeviceId),
-            "automatic removal retains conversation and queued message");
+            "offline device retains conversation and queued message");
 
         await node.StartAsync(port, "127.0.0.1");
         await Refresh();
         Require(window.Peers.Single(row => row.Peer.DeviceId == peer.DeviceId).Note == "保留备注",
             "returning peer reappears with its saved note");
         await node.StopAsync();
+        using var alternateReservation = new TcpListener(IPAddress.Loopback, 0);
+        alternateReservation.Start();
+        var alternatePort = ((IPEndPoint)alternateReservation.LocalEndpoint).Port;
+        alternateReservation.Stop();
+        store.UpsertPeerEndpoint(new PeerEndpoint(peer.DeviceId, "127.0.0.1", alternatePort,
+            PeerEndpointKind.Direct, null, "Manual", null));
         var replacement = new NodeStore(Path.Combine(Output, "replacement-" + Guid.NewGuid().ToString("N")));
         replacement.SaveSettings("另一个设备", null, port, false);
         await using var otherNode = new PeerNode(replacement);
         await otherNode.StartAsync(port, "127.0.0.1");
         await Refresh();
+        var remaining = window.Peers.Single(row => row.Peer.DeviceId == peer.DeviceId);
+        Require(remaining.Status == "离线" && remaining.Peer.Port == alternatePort,
+            "changed address retains offline peer while another valid endpoint remains");
+        store.MarkEndpointDeviceChanged(store.GetPeerEndpoints(peer.DeviceId)
+            .Single(item => item.Port == alternatePort));
+        RefreshView();
         Require(window.Peers.All(row => row.Peer.DeviceId != peer.DeviceId), "changed endpoint does not keep stale device row");
         Require(store.GetPeer(peer.DeviceId) is not null, "changed endpoint preserves original device history");
     }

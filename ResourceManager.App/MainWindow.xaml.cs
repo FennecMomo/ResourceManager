@@ -362,17 +362,20 @@ public partial class MainWindow : Window
         var notes = store.GetPeerNotes();
         foreach (var peer in store.GetPeers())
         {
-            // Keep persisted endpoints/history for automatic reconnection, but drop lost rows from this view.
-            if (peerStatus.GetValueOrDefault(peer.DeviceId) is not ("在线" or "身份校验失败")) continue;
-            var endpoint = store.GetPeerEndpoints(peer.DeviceId)
-                .FirstOrDefault(item => item.Ip == peer.Ip && item.Port == peer.Port && item.Source != "DeviceChanged");
-            var gateway = endpoint?.GatewayId is null
+            // An offline endpoint can recover. Hide only peers with no remaining usable endpoint.
+            var endpoints = store.GetPeerEndpoints(peer.DeviceId)
+                .Where(item => item.Source != "DeviceChanged").ToArray();
+            if (endpoints.Length == 0) continue;
+            var endpoint = endpoints.FirstOrDefault(item => item.Ip == peer.Ip && item.Port == peer.Port)
+                ?? endpoints[0];
+            var gateway = endpoint.GatewayId is null
                 ? null
                 : store.GetGateways().FirstOrDefault(item => item.Id == endpoint.GatewayId);
-            var source = endpoint?.Kind == PeerEndpointKind.Gateway
-                ? $"{gateway?.Name ?? "路由器入口"} · {peer.Port}"
-                : endpoint is null ? "入口已移除" : "局域网直连";
-            Peers.Add(new PeerRow(peer, peerStatus.GetValueOrDefault(peer.DeviceId, "未检查"),
+            var source = endpoint.Kind == PeerEndpointKind.Gateway
+                ? $"{gateway?.Name ?? "路由器入口"} · {endpoint.Port}"
+                : "局域网直连";
+            Peers.Add(new PeerRow(peer with { Ip = endpoint.Ip, Port = endpoint.Port },
+                peerStatus.GetValueOrDefault(peer.DeviceId, "未检查"),
                 AvatarImage(peer.Avatar), source, notes.GetValueOrDefault(peer.DeviceId, "")));
         }
         PeersGrid.SelectedItem = Peers.FirstOrDefault(p => p.Peer.DeviceId == selected);
@@ -588,7 +591,10 @@ public partial class MainWindow : Window
             RefreshPeersView();
             return;
         }
-        if (peerStatus.GetValueOrDefault(peer.DeviceId) is not ("设备已变更" or "身份校验失败"))
+        var hasAvailableEndpoint = store.GetPeerEndpoints(peer.DeviceId)
+            .Any(item => item.Source != "DeviceChanged");
+        if (peerStatus.GetValueOrDefault(peer.DeviceId) != "身份校验失败" &&
+            (peerStatus.GetValueOrDefault(peer.DeviceId) != "设备已变更" || hasAvailableEndpoint))
             peerStatus[peer.DeviceId] = "离线";
         peerCatalogs.Remove(peer.DeviceId);
         peerResourceGroups.Remove(peer.DeviceId);
