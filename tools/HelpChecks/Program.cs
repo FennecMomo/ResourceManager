@@ -61,8 +61,15 @@ internal static class Program
                 Require(help.Chapters.All(c => c.Steps.Count == 3 && c.Steps.All(s => !string.IsNullOrWhiteSpace(s.Screenshot)) && !string.IsNullOrWhiteSpace(c.Tip)),
                     "every chapter includes three screenshot steps and a note");
                 Require(help.Chapters.Last().Tools?.Count == 12, "MCP chapter documents every current tool");
-                Require(help.Chapters.Last().CommandExample?.Contains("codex mcp add resource-manager") == true,
-                    "MCP chapter includes a selectable registration command");
+                var aiChapter = help.Chapters.Last();
+                Require(aiChapter.AiSetupPrompt?.Contains("resource-manager/SKILL.md") == true &&
+                    aiChapter.AiSetupPrompt.Contains("--mcp") && aiChapter.AiSetupPrompt.Contains("resource_manager_status"),
+                    "MCP chapter includes an AI setup prompt and the embedded skill");
+                var installedPath = @"C:\Program Files\ResourceManager\ResourceManager.exe";
+                Require(HelpWindow.CreateAiSetupPrompt(installedPath).Contains(installedPath),
+                    "AI setup prompt includes the current executable path");
+                Require(help.FindName("CopyPromptStatus") is TextBlock,
+                    "MCP chapter has copy feedback without a dialog");
                 foreach (var chapter in help.Chapters)
                 foreach (var step in chapter.Steps)
                 {

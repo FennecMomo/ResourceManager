@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -13,10 +14,10 @@ public sealed record HelpStep(string Number, string Title, string Description)
 
 public sealed record HelpTool(string Name, string Description);
 public sealed record HelpChapter(string Number, string Title, string Subtitle, string Intro,
-    IReadOnlyList<HelpStep> Steps, string Tip, IReadOnlyList<HelpTool>? Tools = null, string? CommandExample = null)
+    IReadOnlyList<HelpStep> Steps, string Tip, IReadOnlyList<HelpTool>? Tools = null, string? AiSetupPrompt = null)
 {
     public Visibility ToolVisibility => Tools is { Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility CommandVisibility => string.IsNullOrWhiteSpace(CommandExample) ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility AiSetupVisibility => string.IsNullOrWhiteSpace(AiSetupPrompt) ? Visibility.Collapsed : Visibility.Visible;
 }
 
 public partial class HelpWindow : Window
@@ -30,9 +31,27 @@ public partial class HelpWindow : Window
         ChapterList.SelectedIndex = 0;
     }
 
-    private void Chapter_SelectionChanged(object sender, SelectionChangedEventArgs e) => ChapterScroll?.ScrollToTop();
+    private void Chapter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        ChapterScroll?.ScrollToTop();
+        if (CopyPromptStatus is not null) CopyPromptStatus.Text = "复制后粘贴到你正在使用的 AI 对话中";
+    }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void CopyAiSetup_Click(object sender, RoutedEventArgs e)
+    {
+        if (ChapterList.SelectedItem is not HelpChapter { AiSetupPrompt: { Length: > 0 } prompt }) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(prompt);
+            CopyPromptStatus.Text = "已复制，可以粘贴给 AI";
+        }
+        catch (Exception)
+        {
+            CopyPromptStatus.Text = "复制失败，请选中下方文字手动复制";
+        }
+    }
 
     private void Screenshot_Click(object sender, RoutedEventArgs e)
     {
@@ -133,7 +152,7 @@ public partial class HelpWindow : Window
             "服务器上传会在服务器保存副本；下载和权限取决于该服务器的配置与资源所有者设置。"),
 
         new("10", "MCP 与 AI", "让 AI 使用本机 ResourceManager 工具",
-            "MCP 通过当前用户的本机通道连接正在运行的客户端。配置完成后，AI 可按你的指令查询设备、搜索资源、发布内容或发送消息。",
+            "MCP 通过当前用户的本机通道连接正在运行的客户端。推荐复制下方指令交给你使用的 AI，让它同时配置 MCP 和资源传递 Skill。",
             [T("01", "保持客户端运行", "先正常启动 ResourceManager。AI 使用工具时，本机客户端需要处于运行状态；最小化到托盘也可以。"),
              T("02", "注册 MCP 服务", "在支持本机 stdio MCP 的 AI 客户端中，把当前版本的 ResourceManager.exe 设为命令，并添加 --mcp 参数。Codex 可运行：codex mcp add resource-manager -- <EXE 绝对路径> --mcp。"),
              T("03", "验证并开始使用", "运行 codex mcp get resource-manager 核对路径；在新的 AI 会话中要求它“刷新设备并搜索名称包含报告的资源”。发布或发消息前，请核对目标和内容。")],
@@ -150,8 +169,7 @@ public partial class HelpWindow : Window
              new("resource_manager_list_messages", "查看指定会话的消息和状态"),
              new("resource_manager_send_message", "发送文字消息"),
              new("resource_manager_send_resource_card", "发送已发布资源卡片")],
-            "codex mcp add resource-manager -- \"C:\\Path\\To\\ResourceManager.exe\" --mcp\n" +
-            "codex mcp get resource-manager")
+            CreateAiSetupPrompt(Environment.ProcessPath))
         };
 
         foreach (var chapter in chapters)
@@ -161,4 +179,32 @@ public partial class HelpWindow : Window
     }
 
     private static HelpStep T(string number, string title, string description) => new(number, title, description);
+
+    internal static string CreateAiSetupPrompt(string? executablePath)
+    {
+        var path = !string.IsNullOrWhiteSpace(executablePath) &&
+            Path.GetFileName(executablePath).Equals("ResourceManager.exe", StringComparison.OrdinalIgnoreCase)
+            ? executablePath
+            : "<请替换为当前运行的 ResourceManager.exe 绝对路径>";
+        using var stream = typeof(HelpWindow).Assembly.GetManifestResourceStream("ResourceManager.AiSkill.md")
+            ?? throw new InvalidOperationException("ResourceManager AI Skill 模板未嵌入程序。");
+        using var reader = new StreamReader(stream);
+        var skill = reader.ReadToEnd().TrimEnd();
+        return $"""
+            请在你当前运行的 AI 客户端中接入本机 ResourceManager，并安装下面的用户级 Skill，使今后我只说“发给另一台设备”“找远端文件”等需求时，你也会考虑使用它。
+
+            ResourceManager.exe 绝对路径：{path}
+            MCP 启动方式：以该 EXE 为命令，参数为 --mcp，服务器名称为 resource-manager。请不要把它当普通图形程序启动。连接前确认 ResourceManager 客户端正在本机运行。
+
+            请先识别你自己的产品及版本，使用该产品实际支持的本机配置方式，把这个 stdio MCP 和下方 SKILL.md 安装到用户级范围；若产品通过插件或连接器同时提供 MCP 与 Skill，可采用该机制。保留现有其他配置，不覆盖同名但非 ResourceManager 的内容。不要使用屏幕控制或鼠标键盘自动化。若你运行在云端、无法访问此 Windows EXE，或产品不支持本机 MCP / 用户级 Skill，请说明具体限制和我需要手动完成的步骤，不要声称安装成功。
+
+            安装后，请核对 MCP 工具列表、调用 resource_manager_status，并确认 Skill 能被发现。需要重开 AI 会话才生效时请明确告知。最后列出你实际修改的配置位置、验证结果和仍未完成的步骤。
+
+            以下内容请原样保存为 resource-manager/SKILL.md：
+
+            ```markdown
+            {skill}
+            ```
+            """;
+    }
 }

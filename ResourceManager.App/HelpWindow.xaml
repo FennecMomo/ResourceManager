@@ -77,6 +77,26 @@
                         <TextBlock Text="{Binding Intro}" FontSize="13" LineHeight="22" Foreground="{StaticResource HelpInk}"
                                    TextWrapping="Wrap" Margin="0,20,0,20"/>
 
+                        <Border Background="#EFF5FD" BorderBrush="#D3E3F7" BorderThickness="1" CornerRadius="9"
+                                Padding="14" Margin="0,0,0,20" Visibility="{Binding AiSetupVisibility}">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="复制给 AI：配置 MCP 并安装 Skill" FontSize="15" FontWeight="SemiBold"
+                                               Foreground="{StaticResource HelpInk}" VerticalAlignment="Center"/>
+                                    <Button Grid.Column="1" Content="复制整段指令" Click="CopyAiSetup_Click" Padding="12,6"
+                                            Background="#2867D9" Foreground="White" BorderThickness="0" Cursor="Hand"
+                                            AutomationProperties.Name="复制 MCP 与 Skill 接入指令"/>
+                                </Grid>
+                                <TextBlock x:Name="CopyPromptStatus" Text="复制后粘贴到你正在使用的 AI 对话中"
+                                           FontSize="12" Foreground="{StaticResource HelpMuted}" Margin="0,0,0,8"/>
+                                <TextBox Text="{Binding AiSetupPrompt}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                                         FontSize="12" Foreground="#1B2B43" Background="White" Height="220"
+                                         BorderBrush="#CBD9EA" BorderThickness="1" Padding="8"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"/>
+                            </StackPanel>
+                        </Border>
+
                         <TextBlock Text="跟着截图操作" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource HelpInk}" Margin="0,1,0,5"/>
                         <TextBlock Text="红框指出本步要找的控件。界面截图取自隔离演示资料，MCP 命令图为示意；点击图片可查看原尺寸。"
                                    FontSize="12" Foreground="{StaticResource HelpMuted}" TextWrapping="Wrap" Margin="0,0,0,15"/>
@@ -108,17 +128,6 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <Border Background="#EFF5FD" BorderBrush="#D3E3F7" BorderThickness="1" CornerRadius="9"
-                                Padding="14" Margin="0,0,0,18" Visibility="{Binding CommandVisibility}">
-                            <StackPanel>
-                                <TextBlock Text="可复制的 Codex 命令（先替换 EXE 路径）" FontSize="12" FontWeight="SemiBold"
-                                           Foreground="{StaticResource HelpInk}" Margin="0,0,0,8"/>
-                                <TextBox Text="{Binding CommandExample}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
-                                         FontFamily="Consolas" FontSize="12" Foreground="#1B2B43" Background="White"
-                                         BorderBrush="#CBD9EA" BorderThickness="1" Padding="8" Height="65"
-                                         HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"/>
-                            </StackPanel>
-                        </Border>
                         <StackPanel Margin="0,4,0,18" Visibility="{Binding ToolVisibility}">
                             <TextBlock Text="MCP 工具清单" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource HelpInk}" Margin="0,0,0,10"/>
                             <ItemsControl ItemsSource="{Binding Tools}">

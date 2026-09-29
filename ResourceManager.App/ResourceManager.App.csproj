@@ -4,6 +4,7 @@
     <ProjectReference Include="..\ResourceManager.Core\ResourceManager.Core.csproj" />
     <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
     <EmbeddedResource Include="Assets\ResourceManager.ico" LogicalName="ResourceManager.AppIcon.ico" />
+    <EmbeddedResource Include="Assets\Ai\resource-manager\SKILL.md" LogicalName="ResourceManager.AiSkill.md" />
     <Resource Include="Assets\ResourceManager.png" />
     <Resource Include="Assets\Help\*.png" />
   </ItemGroup>
@@ -11,7 +12,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <AssemblyName>ResourceManager</AssemblyName>
-    <Version>0.7.2</Version>
+    <Version>0.7.3</Version>
     <Authors>慕沐</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <TargetFramework>net10.0-windows</TargetFramework>

@@ -1,8 +1,10 @@
-# ResourceManager 本机 MCP 接入（客户端 0.7.0）
+# ResourceManager 本机 MCP 接入（客户端 0.7.3）
 
 运行中的客户端通过仅限当前 Windows 用户的命名管道提供一组固定操作。AI 客户端以 stdio 启动同一个 `ResourceManager.exe --mcp`，该进程把 MCP 工具调用转交给正在运行的 ResourceManager 客户端。它不会启动第二份资料库、激活窗口、注入鼠标键盘或监听 HTTP 端口。独立反馈服务端不在此通道内。
 
-从客户端 0.7.2 起，主窗口右上角“帮助”中的“MCP 与 AI”章节也提供截图式接入步骤、可复制的 Codex 命令和当前工具清单。
+主窗口右上角“帮助”中的“MCP 与 AI”章节提供可复制的 AI 接入指令、截图式接入步骤和当前工具清单。接入指令会带上当前运行的 EXE 路径，以及内嵌的 [ResourceManager Skill 模板](../ResourceManager.App/Assets/Ai/resource-manager/SKILL.md)。用户把整段指令粘贴到自己使用的 AI 客户端，由该 AI 根据自身支持的配置方式安装本机 stdio MCP 和用户级 Skill，并核对工具与 Skill 是否生效。模板只维护一份；客户端帮助页从该文件的嵌入资源生成完整指令。
+
+本机 AI 客户端通常可以直接完成配置。若 AI 运行在云端、远程主机，或宿主不支持本机 stdio MCP / 用户级 Skill，接入指令要求它如实报告限制和手动步骤，而不是把未完成的配置报告为成功。ResourceManager 的 MCP 进程本身不会修改 AI 客户端的配置文件。
 
 ## 连接
 
