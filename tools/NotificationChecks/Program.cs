@@ -139,7 +139,11 @@ internal static class Program
                 Console.WriteLine($"PASS: {checks} isolated notification checks.");
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); result = 1; }
-            finally { await (Task)typeof(MainWindow).GetMethod("ExitAsync", Private)!.Invoke(window, null)!; }
+            finally
+            {
+                typeof(MainWindow).GetMethod("DiscardSettingsEdits", Private)!.Invoke(window, null);
+                await (Task)typeof(MainWindow).GetMethod("ExitAsync", Private)!.Invoke(window, null)!;
+            }
         });
         app.Run();
         return result;

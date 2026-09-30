@@ -134,9 +134,9 @@ public sealed class PeerNode : IAsyncDisposable
             // Unknown and forbidden IDs are indistinguishable unless this device previously saw the resource.
             return Visitor(context) is null || resource is null && store.PreviouslySawResource(id, Visitor(context)) ? Results.NotFound() : Results.StatusCode(403);
         }
-        instance.MapGet("/api/v1/resources", (HttpContext context) => Results.Ok(store.VisibleCatalog(Visitor(context), catalog).Resources));
-        instance.MapGet("/api/v1/resource-catalog", (HttpContext context) => Results.Ok(store.VisibleCatalog(Visitor(context), catalog)));
-        instance.MapGet("/api/v1/resources/{id}", (string id, HttpContext context) => AccessDenied(id, context) ?? Results.Ok(catalog.Describe(store.GetResource(id)!)));
+        instance.MapGet("/api/v1/resources", (HttpContext context) => Results.Ok(store.VisibleCatalog(Visitor(context), catalog, context.RequestAborted).Resources));
+        instance.MapGet("/api/v1/resource-catalog", (HttpContext context) => Results.Ok(store.VisibleCatalog(Visitor(context), catalog, context.RequestAborted)));
+        instance.MapGet("/api/v1/resources/{id}", (string id, HttpContext context) => AccessDenied(id, context) ?? Results.Ok(catalog.Describe(store.GetResource(id)!, context.RequestAborted)));
         instance.MapPost("/api/v1/git/sync", (GitSyncRequest request) =>
         {
             if (request.Events is null || request.Known is null ||
@@ -161,7 +161,7 @@ public sealed class PeerNode : IAsyncDisposable
         instance.MapGet("/api/v1/resources/{id}/tree", (string id, HttpContext context) =>
         {
             if (AccessDenied(id, context) is { } denied) return denied;
-            try { return Results.Ok(catalog.ListFiles(id)); }
+            try { return Results.Ok(catalog.ListFiles(id, cancellationToken: context.RequestAborted)); }
             catch (FileNotFoundException) { return Results.NotFound(); }
         });
         instance.MapGet("/api/v1/resources/{id}/content", (string id, string? path, HttpContext context) =>
@@ -193,13 +193,13 @@ public sealed class PeerNode : IAsyncDisposable
         {
             var peerId = PrivateRecipient(id, context);
             var resource = peerId is null ? null : store.GetPrivateResource(id, peerId);
-            return resource is null ? Results.NotFound() : Results.Ok(catalog.Describe(resource));
+            return resource is null ? Results.NotFound() : Results.Ok(catalog.Describe(resource, context.RequestAborted));
         });
         instance.MapGet("/api/v1/chat/resources/{id}/tree", (string id, HttpContext context) =>
         {
             var peerId = PrivateRecipient(id, context);
             if (peerId is null) return Results.NotFound();
-            try { return Results.Ok(catalog.ListFiles(id, peerId)); }
+            try { return Results.Ok(catalog.ListFiles(id, peerId, context.RequestAborted)); }
             catch (FileNotFoundException) { return Results.NotFound(); }
         });
         instance.MapGet("/api/v1/chat/resources/{id}/content", (string id, string? path, HttpContext context) =>

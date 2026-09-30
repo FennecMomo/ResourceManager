@@ -148,6 +148,22 @@ public partial class MainWindow
         finally { resolvingSettingsNavigation = false; }
     }
 
+    private async Task<bool> CanExitWithSettingsAsync()
+    {
+        if (resolvingSettingsNavigation || savingSettings) return false;
+        if (!HasUnsavedSettings) return true;
+        resolvingSettingsNavigation = true;
+        try
+        {
+            var choice = ConfirmSettingsLeave("设置或路由器入口有未保存的修改。请选择保存后退出、放弃修改，或继续编辑。");
+            if (choice == SettingsLeaveChoice.KeepEditing) return false;
+            if (choice == SettingsLeaveChoice.Discard) { DiscardSettingsEdits(); return true; }
+            if (HasUnsavedGeneralSettings && !await SaveSettingsAsync()) return false;
+            return !HasUnsavedGateway || SaveGatewayDraft();
+        }
+        finally { resolvingSettingsNavigation = false; }
+    }
+
     private async void SaveSettings_Click(object sender, RoutedEventArgs e) => await SaveSettingsAsync();
 
     private async Task<bool> SaveSettingsAsync()

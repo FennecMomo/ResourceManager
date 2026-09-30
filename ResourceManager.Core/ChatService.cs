@@ -38,8 +38,9 @@ public sealed class ChatService
 
     public ChatMessage QueueResource(string peerId, string resourceId)
     {
-        var resource = catalog.List().FirstOrDefault(item => item.Id == resourceId && item.Available)
-            ?? throw new InvalidOperationException("资源已撤销或原文件不可用。");
+        var local = store.GetResource(resourceId) ?? throw new InvalidOperationException("资源已撤销或原文件不可用。");
+        var resource = catalog.Describe(local);
+        if (!resource.Available) throw new InvalidOperationException("资源已撤销或原文件不可用。");
         var message = store.QueueChatMessage(peerId, "Resource", null, resource.Id, resource.Name, clock());
         MessageChanged?.Invoke(message);
         return message;
@@ -178,7 +179,7 @@ public sealed class ChatService
                 SetState(message, "Failed", error: "对方版本不支持私发资源，请先升级到 0.4.4 或更新版本。");
                 continue;
             }
-            if (message.Kind == "Resource" && !catalog.List().Any(item => item.Id == message.ResourceId && item.Available) ||
+            if (message.Kind == "Resource" && (store.GetResource(message.ResourceId!) is not { } local || !catalog.Describe(local, cancellationToken).Available) ||
                 message.Kind == "PrivateResource" && (store.GetPrivateResource(message.ResourceId!, peerId) is not { } privateResource ||
                     !catalog.Describe(privateResource).Available))
             {

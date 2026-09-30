@@ -123,15 +123,30 @@ public sealed partial class NodeStore
         }
     }
 
-    internal ResourceTreeCatalog VisibleCatalog(string? peerId, ResourceCatalog catalog)
+    internal ResourceTreeCatalog VisibleCatalog(string? peerId, ResourceCatalog catalog, CancellationToken token = default) =>
+        VisibleCatalog(peerId, resource => catalog.Describe(resource, token), token);
+
+    internal ResourceTreeCatalog VisibleCatalog(string? peerId, Func<LocalResource, RemoteResource> describe, CancellationToken token = default)
     {
+        LocalResource[] snapshot;
+        lock (gate) snapshot = GetResources().Where(r => CanAccessGroup(r.GroupId, peerId)).ToArray();
+        // Directory enumeration must not hold the database gate needed by health,
+        // chat and UI settings. Recheck publication and permission after inspecting.
+        var inspected = snapshot.Select(local =>
+        {
+            token.ThrowIfCancellationRequested();
+            return (Local: local, Remote: describe(local));
+        }).ToArray();
+        token.ThrowIfCancellationRequested();
         lock (gate)
         {
             var groups = GetResourceGroups().Where(g => CanAccessGroup(g.Id, peerId)).ToArray();
             var ids = groups.Select(g => g.Id).ToHashSet();
             // Explicitly public children of a hidden parent become roots; no hidden ancestor names are exposed.
             groups = groups.Select(g => g.ParentId is not null && !ids.Contains(g.ParentId) ? g with { ParentId = null } : g).ToArray();
-            var resources = GetResources().Where(r => ids.Contains(r.GroupId)).Select(r => catalog.Describe(r)).ToArray();
+            var current = GetResources().ToDictionary(r => r.Id);
+            var resources = inspected.Where(item => ids.Contains(item.Local.GroupId) &&
+                current.GetValueOrDefault(item.Local.Id) == item.Local).Select(item => item.Remote).ToArray();
             if (peerId is not null)
             {
                 using var db = Open(); using var tx = db.BeginTransaction();

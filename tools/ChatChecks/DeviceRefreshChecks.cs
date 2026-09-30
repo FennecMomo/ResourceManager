@@ -59,6 +59,27 @@ internal static partial class Program
         store.RemovePeer(slowId);
         grid.SelectedItem = window.Peers.Single(row => row.Peer.DeviceId == peer.DeviceId);
         Require(window.RemoteResources.Any(row => row.Resource.Id == resource.Id), "online peer and resources appear after refresh");
+        var seam = typeof(MainWindow).GetField("isolatedDeviceDiscovery", Private)!;
+        using (var oldAddress = new TcpListener(IPAddress.Loopback, 0))
+        {
+            oldAddress.Start();
+            var oldPort = ((IPEndPoint)oldAddress.LocalEndpoint).Port;
+            var oldEndpoint = new PeerEndpoint(peer.DeviceId, "127.0.0.1", oldPort, PeerEndpointKind.Direct, null, "Manual", null);
+            store.UpsertPeerEndpoint(oldEndpoint);
+            seam.SetValue(window, (Func<CancellationToken, Action<DiscoveredPeer>, Task>)((_, _) => Task.CompletedTask));
+            try
+            {
+                await (Task)typeof(MainWindow).GetMethod("RefreshDevicesAsync", Private)!.Invoke(window, [false])!;
+                Require(window.Peers.Single(row => row.Peer.DeviceId == peer.DeviceId).Status == "在线",
+                    "a failed alternate address cannot replace this round's successful device identity probe");
+            }
+            finally
+            {
+                seam.SetValue(window, null);
+                store.MarkEndpointDeviceChanged(oldEndpoint);
+                await (Task)typeof(MainWindow).GetField("deviceDetailsRefresh", Private)!.GetValue(window)!;
+            }
+        }
         // The LAN lane must not sit behind twenty stalled saved endpoints.
         var stalls = new List<TcpListener>();
         var ids = new List<string>();
@@ -67,7 +88,6 @@ internal static partial class Program
             var id = "slow-lane-" + index; ids.Add(id);
             store.UpsertPeer(new PeerInfo(id, "127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port, "历史慢设备" + index, null, null));
         }
-        var seam = typeof(MainWindow).GetField("isolatedDeviceDiscovery", Private)!;
         seam.SetValue(window, (Func<CancellationToken, Action<DiscoveredPeer>, Task>)(async (token, callback) => {
             await Task.Delay(30, token);
             callback(new DiscoveredPeer(peer.DeviceId, "127.0.0.1", port, "快速局域网设备"));

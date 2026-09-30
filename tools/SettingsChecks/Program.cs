@@ -55,6 +55,9 @@ internal static class Program
                 await Navigate(7);
                 Require(!Dirty() && !window.IsVisible, "initial clean and hidden");
                 name.Text = "draft";
+                await (Task)Call("ExitAsync")!;
+                Require(Dirty() && name.Text == "draft" && !(bool)typeof(MainWindow).GetField("exiting", Private)!.GetValue(window)!,
+                    "cancel exit preserves the draft and leaves services running");
                 await Navigate(0);
                 Require(tabs.SelectedIndex == 7 && nav.SelectedIndex == 7 && name.Text == "draft", "cancel keeps both selectors and draft");
                 name.Text = originalName;
@@ -167,6 +170,15 @@ internal static class Program
                     store.GetGateways().Any(g => g.Name == "New router" && g.WanIp == "192.168.14.1"), "save and leave persists profile plus new router");
                 await Navigate(7);
 
+                choice = SettingsLeaveChoice.Save;
+                name.Text = "saved before exit";
+                Require(await (Task<bool>)Call("CanExitWithSettingsAsync")! && !Dirty() && store.GetSettings().Profile.Nickname == name.Text,
+                    "exit saves settings before allowing shutdown");
+                port.Text = "invalid";
+                Require(!await (Task<bool>)Call("CanExitWithSettingsAsync")! && Dirty(), "invalid settings block shutdown");
+                choice = SettingsLeaveChoice.Discard;
+                Require(await (Task<bool>)Call("CanExitWithSettingsAsync")! && !Dirty(), "explicit discard permits shutdown");
+
                 var root = (FrameworkElement)window.Content;
                 var scroll = Control<ScrollViewer>("SettingsScrollViewer");
                 var save = Control<Button>("SaveSettingsButton");
@@ -186,7 +198,11 @@ internal static class Program
                 Console.WriteLine($"PASS: {checks} isolated settings checks; no live data, registry, network or desktop interaction.");
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); result = 1; }
-            finally { await (Task)typeof(MainWindow).GetMethod("ExitAsync", Private)!.Invoke(window, null)!; }
+            finally
+            {
+                typeof(MainWindow).GetMethod("DiscardSettingsEdits", Private)!.Invoke(window, null);
+                await (Task)typeof(MainWindow).GetMethod("ExitAsync", Private)!.Invoke(window, null)!;
+            }
         });
         app.Run();
         return result;

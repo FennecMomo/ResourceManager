@@ -93,6 +93,7 @@ public partial class MainWindow
             var target = dialog.SelectedPath;
             if (System.Windows.MessageBox.Show(this, $"将存储位置迁移到：\n{target}\n\n程序会暂停下载、停止共享并重启。是否继续？",
                     "迁移存储位置", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            if (!await CanExitWithSettingsAsync()) return;
             var configuration = StorageBootstrap.Locations.Read() ?? new StorageConfiguration(store.DataDirectory, true);
             StorageBootstrap.Locations.ScheduleMigration(configuration, target);
             restartForStorage = true;

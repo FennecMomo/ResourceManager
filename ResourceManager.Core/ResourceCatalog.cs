@@ -87,11 +87,12 @@ public sealed class ResourceCatalog(NodeStore store)
         catch (UnauthorizedAccessException) { return new RemoteResource(resource.Id, resource.Name, resource.Kind, resource.Mode, 0, resource.PublishedUtc, false, resource.Note, resource.GroupId); }
     }
 
-    public IReadOnlyList<RemoteFile> ListFiles(string resourceId, string? privatePeer = null)
+    public IReadOnlyList<RemoteFile> ListFiles(string resourceId, string? privatePeer = null, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var resource = (privatePeer is null ? store.GetResource(resourceId) : store.GetPrivateResource(resourceId, privatePeer)) ?? throw new FileNotFoundException("资源已撤销。");
-        if (!Describe(resource).Available) throw new FileNotFoundException("资源原文件不可用。");
-        return EnumerateFiles(resource).ToList();
+        if (!Describe(resource, cancellationToken).Available) throw new FileNotFoundException("资源原文件不可用。");
+        return EnumerateFiles(resource, cancellationToken).ToList();
     }
 
     private static IEnumerable<RemoteFile> EnumerateFiles(LocalResource resource, CancellationToken cancellationToken = default)
@@ -137,7 +138,11 @@ public sealed class ResourceCatalog(NodeStore store)
             return new FileInfo(resource.SourcePath);
         }
         if (string.IsNullOrEmpty(relativePath)) throw new ArgumentException("请选择文件夹内的文件。");
-        var parts = relativePath.Replace('\\', '/').Split('/');
+        var normalized = relativePath.Replace('\\', '/');
+        // Reject Win32 aliases before resolving the path, including trailing dots/
+        // spaces which could otherwise turn '.git.' into the hidden '.git' folder.
+        if (!StoredPaths.Valid(normalized)) throw new ArgumentException("路径无效。");
+        var parts = normalized.Split('/');
         if (parts.Any(p => p is "" or "." or ".." || p.Contains(':') ||
                            p.Equals(".git", StringComparison.OrdinalIgnoreCase))) throw new ArgumentException("路径无效。");
         var root = Path.GetFullPath(resource.SourcePath);

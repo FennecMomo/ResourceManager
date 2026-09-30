@@ -4,23 +4,8 @@ namespace ResourceManager.Core;
 
 public sealed class DownloadManager(NodeStore store, IResourceClient client, Func<DownloadJob, PeerInfo?>? resolvePeer = null)
 {
-    public DownloadJob CreateJob(PeerInfo peer, RemoteResource resource, string destinationDirectory)
-    {
-        if (!resource.Available) throw new InvalidOperationException("资源当前不可下载。");
-        destinationDirectory = Path.GetFullPath(destinationDirectory);
-        Directory.CreateDirectory(destinationDirectory);
-        var name = Path.GetFileName(resource.Name);
-        if (name is "" or "." or ".." || name != resource.Name) throw new InvalidDataException("资源名称无效。");
-        var target = Path.Combine(destinationDirectory, name);
-        var stem = resource.Kind == ResourceKind.File ? Path.GetFileNameWithoutExtension(name) : name;
-        var extension = resource.Kind == ResourceKind.File ? Path.GetExtension(name) : "";
-        for (var index = 2; File.Exists(target) || Directory.Exists(target) || File.Exists(target + ".rm-part"); index++)
-            target = Path.Combine(destinationDirectory, $"{stem} ({index}){extension}");
-        var job = new DownloadJob(Guid.NewGuid().ToString("N"), peer.DeviceId, resource.Id, resource.Name,
-            resource.Kind, target, "等待下载", 0, resource.Size, null);
-        store.SaveDownload(job);
-        return job;
-    }
+    public DownloadJob CreateJob(PeerInfo peer, RemoteResource resource, string destinationDirectory) =>
+        store.CreateDownload(peer, resource, destinationDirectory);
 
     public async Task<DownloadJob> RunAsync(string jobId, IProgress<DownloadJob>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -34,6 +19,14 @@ public sealed class DownloadManager(NodeStore store, IResourceClient client, Fun
             var entries = await client.GetFilesAsync(peer, job.ResourceId, cancellationToken).ConfigureAwait(false);
             if (job.Kind == ResourceKind.File && (entries.Count != 1 || entries[0].IsDirectory))
                 throw new InvalidDataException("文件目录信息无效。");
+            var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in entries)
+            {
+                if (entry.Size < 0 || !targets.Add(TargetFor(job, entry))) throw new InvalidDataException("远端目录包含无效大小或重复路径。");
+            }
+            if (entries.Where(e => !e.IsDirectory).Any(e => targets.Contains(TargetFor(job, e) + ".rm-part") ||
+                    targets.Contains(TargetFor(job, e) + ".rm-etag")))
+                throw new InvalidDataException("远端文件名与下载临时文件冲突。");
             var total = entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
             job = job with { Status = "下载中", TotalBytes = total, Error = null };
             SaveAndReport(job, progress);
@@ -99,12 +92,9 @@ public sealed class DownloadManager(NodeStore store, IResourceClient client, Fun
             if (entry.RelativePath != "") throw new InvalidDataException("文件路径无效。");
             return job.TargetPath;
         }
-        var parts = entry.RelativePath.Replace('\\', '/').Split('/');
-        if (parts.Any(p => p is "" or "." or ".." || p.Contains(':'))) throw new InvalidDataException("远端目录包含无效路径。");
-        var path = Path.GetFullPath(Path.Combine([job.TargetPath, .. parts]));
-        var prefix = Path.TrimEndingDirectorySeparator(Path.GetFullPath(job.TargetPath)) + Path.DirectorySeparatorChar;
-        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("远端目录越界。");
-        return path;
+        var relative = entry.RelativePath.Replace('\\', '/');
+        if (!StoredPaths.Valid(relative)) throw new InvalidDataException("远端目录包含无效路径。");
+        return StoredPaths.Resolve(job.TargetPath, relative);
     }
 
     private async Task DownloadFileAsync(PeerInfo peer, string resourceId, RemoteFile file, string target,
@@ -136,36 +126,54 @@ public sealed class DownloadManager(NodeStore store, IResourceClient client, Fun
         }
         if (offset == file.Size && offset > 0)
         {
-            if (!await Verified(partial).ConfigureAwait(false)) { File.Delete(partial); File.Delete(tagPath); throw new IOException("续传文件校验失败，请重试。"); }
-            File.Move(partial, target, true);
-            File.SetLastWriteTimeUtc(target, file.ModifiedUtc.UtcDateTime);
-            File.Delete(tagPath);
-            report(file.Size);
-            return;
+            if (metadata is not null)
+            {
+                if (!await Verified(partial).ConfigureAwait(false)) { File.Delete(partial); File.Delete(tagPath); throw new IOException("续传文件校验失败，请重试。"); }
+                File.Move(partial, target, true);
+                File.SetLastWriteTimeUtc(target, file.ModifiedUtc.UtcDateTime);
+                File.Delete(tagPath);
+                report(file.Size);
+                return;
+            }
+            // A complete partial file may belong to an older same-size version. Without a
+            // current content hash it must be fetched again, not promoted based on length.
+            offset = 0;
         }
         using var response = await client.OpenFileAsync(peer, resourceId, file.RelativePath, offset, tag, cancellationToken).ConfigureAwait(false);
-        if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
+        if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable && offset > 0)
         {
+            response.Dispose();
             File.Delete(partial);
             File.Delete(tagPath);
             await DownloadFileAsync(peer, resourceId, file, target, report, cancellationToken).ConfigureAwait(false);
             return;
         }
         response.EnsureSuccessStatusCode();
-        var append = offset > 0 && response.StatusCode == HttpStatusCode.PartialContent && response.Content.Headers.ContentRange?.From == offset;
+        if (response.StatusCode == HttpStatusCode.PartialContent &&
+            (response.Content.Headers.ContentRange?.From != offset || response.Content.Headers.ContentRange?.Length != file.Size ||
+             response.Content.Headers.ContentRange?.To != file.Size - 1))
+            throw new InvalidDataException("远端返回的续传范围无效。");
+        var append = offset > 0 && response.StatusCode == HttpStatusCode.PartialContent;
         if (!append) offset = 0;
         var responseTag = response.Headers.ETag?.ToString();
+        if (append && responseTag != tag) throw new InvalidDataException("续传期间远端文件版本已变化。");
+        if (response.Content.Headers.ContentLength is long length && length != file.Size - offset)
+            throw new IOException("下载响应大小与远端目录不一致。");
         StorageLocation.EnsureSpace(Path.GetDirectoryName(target)!, Math.Max(0, file.Size - offset));
-        if (responseTag is not null) await File.WriteAllTextAsync(tagPath, responseTag, cancellationToken).ConfigureAwait(false);
         await using (var output = new FileStream(partial, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 64, true))
         await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
         {
+            // Opening/truncating must succeed before a new remote version can label
+            // the partial file; otherwise an I/O failure could retag old bytes.
+            if (responseTag is not null) await File.WriteAllTextAsync(tagPath, responseTag, cancellationToken).ConfigureAwait(false);
+            else File.Delete(tagPath);
             var buffer = new byte[1024 * 64];
             var copied = offset;
             var lastReport = DateTime.UtcNow;
             int count;
             while ((count = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) != 0)
             {
+                if (count > file.Size - copied) throw new IOException("下载内容超过远端声明的大小。");
                 await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
                 copied += count;
                 if ((DateTime.UtcNow - lastReport).TotalMilliseconds >= 250)
