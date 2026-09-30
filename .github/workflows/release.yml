@@ -66,6 +66,11 @@ jobs:
             $assets += 'dist/release/ResourceManager-delta.json'
             $assets += @(Get-ChildItem dist/release -Filter '*.xdelta' | Select-Object -ExpandProperty FullName)
           }
+          $assets | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([System.IO.Path]::GetFileName($_))"
+          } | Set-Content dist/release/SHA256SUMS.txt -Encoding utf8
+          $assets += 'dist/release/SHA256SUMS.txt'
           gh release create $env:GITHUB_REF_NAME $assets --title "ResourceManager $env:GITHUB_REF_NAME" --notes-from-tag --verify-tag
 
   server-release:
