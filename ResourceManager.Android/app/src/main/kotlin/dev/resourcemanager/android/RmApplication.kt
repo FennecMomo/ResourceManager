@@ -35,6 +35,7 @@ class RmApplication : Application() {
     val status = MutableStateFlow("共享已停止")
     val sharing = MutableStateFlow(false)
     val sharingWanted = MutableStateFlow(false)
+    @Volatile internal var sharingService: SharingService? = null
     val busy = MutableStateFlow(false)
     lateinit var downloads: Downloads
         private set
@@ -102,7 +103,23 @@ class RmApplication : Application() {
             .edit()
             .putBoolean("sharingWanted", true)
             .apply()
-        ContextCompat.startForegroundService(this, Intent(this, SharingService::class.java))
+        val runtime = sharingService
+        if (runtime == null) {
+            sharing.value = false
+            serviceState.value = "启动中"
+        } else runtime.reportState()
+        try {
+            ContextCompat.startForegroundService(this, Intent(this, SharingService::class.java))
+        } catch (e: Exception) {
+            if (runtime?.listening == true) runtime.reportState()
+            else {
+                sharing.value = false
+                serviceState.value = "共享启动失败"
+                status.value = "共享启动失败：${e.message ?: e.javaClass.simpleName}"
+            }
+            diagnostic("service_start", e.javaClass.simpleName)
+        }
+        changed()
     }
 
     fun stopSharing() {

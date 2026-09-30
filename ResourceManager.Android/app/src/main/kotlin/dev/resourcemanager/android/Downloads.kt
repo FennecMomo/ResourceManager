@@ -41,7 +41,7 @@ class Downloads(private val app: RmApplication) {
     @Synchronized
     fun resume(t: Transfer) {
         if (jobs.containsKey(t.id)) return
-        require(app.sharing.value) { "请先启动共享，传输期间保持共享服务运行" }
+        require(app.sharing.value) { "共享尚未就绪：${app.serviceState.value}。请检查 Wi-Fi 或重新进入应用" }
         val job =
             app.scope.launch(start = CoroutineStart.LAZY) {
                 var current = t.copy(state = "Running", error = null)

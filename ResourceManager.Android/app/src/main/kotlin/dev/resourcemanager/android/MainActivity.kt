@@ -77,6 +77,12 @@ class MainActivity : ComponentActivity() {
         receiveShare(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // The visible Activity can launch the foreground service, including after a system stop.
+        app.startSharing()
+    }
+
     @Suppress("DEPRECATION")
     private fun receiveShare(intent: Intent?) {
         requestedPeer = intent?.getStringExtra("peer")
@@ -171,17 +177,17 @@ private fun Avatar(name: String, avatar: String? = null) {
             value =
                 withContext(Dispatchers.IO) {
                     runCatching {
-                            avatar
-                                ?.takeIf { it.length <= PeerClient.HELLO_LIMIT }
-                                ?.let { value ->
-                                    val bytes = java.util.Base64.getDecoder().decode(value)
-                                    android.graphics.BitmapFactory.decodeByteArray(
-                                        bytes,
-                                        0,
-                                        bytes.size,
-                                    )
-                                }
-                        }
+                        avatar
+                            ?.takeIf { it.length <= PeerClient.HELLO_LIMIT }
+                            ?.let { value ->
+                                val bytes = java.util.Base64.getDecoder().decode(value)
+                                android.graphics.BitmapFactory.decodeByteArray(
+                                    bytes,
+                                    0,
+                                    bytes.size,
+                                )
+                            }
+                    }
                         .getOrNull()
                 }
         }
@@ -229,7 +235,6 @@ internal fun AppUi(
 ) {
     val revision by app.revision.collectAsStateWithLifecycle()
     val status by app.status.collectAsStateWithLifecycle()
-    val wanted by app.sharingWanted.collectAsStateWithLifecycle()
     val sharing by app.sharing.collectAsStateWithLifecycle()
     val service by app.serviceState.collectAsStateWithLifecycle()
     val busy by app.busy.collectAsStateWithLifecycle()
@@ -422,7 +427,11 @@ internal fun AppUi(
                         Modifier.navigationBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)
                     ) {
                         if (!sharing)
-                            TextButton(onClick = { app.startSharing() }) { Text("启动共享以收发消息") }
+                            Text(
+                                "$service · 消息会在连接恢复后发送",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         Row(verticalAlignment = Alignment.Bottom) {
                             IconButton(onClick = { attachment = true }) { Glyph("add", "发送附件") }
                             OutlinedTextField(
@@ -511,7 +520,9 @@ internal fun AppUi(
                 }
             }
         } else if (page == 6)
-            key(peerId) { ResourcePage(Modifier.padding(padding), app, peer, search, { search = it }) }
+            key(peerId) {
+                ResourcePage(Modifier.padding(padding), app, peer, search, { search = it })
+            }
         else
             LazyColumn(
                 Modifier.padding(padding).fillMaxSize().padding(horizontal = 16.dp),
@@ -532,16 +543,9 @@ internal fun AppUi(
                                 Column(Modifier.weight(1f)) {
                                     Text(service, style = MaterialTheme.typography.labelLarge)
                                     Text(
-                                        if (sharing) "可接收消息与文件" else "开启后允许其他设备连接",
+                                        if (sharing) "可接收消息与文件" else "进入应用后自动共享，等待服务或网络恢复",
                                         style = MaterialTheme.typography.bodySmall,
                                     )
-                                }
-                                TextButton(
-                                    onClick = {
-                                        if (wanted) app.stopSharing() else app.startSharing()
-                                    }
-                                ) {
-                                    Text(if (wanted) "停止" else "开启")
                                 }
                             }
                         }
@@ -643,7 +647,7 @@ internal fun AppUi(
                             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                         }
                         if (data.peers.isEmpty() && candidates.isEmpty())
-                            item { Empty("尚未发现设备", "让电脑与手机连接同一 Wi-Fi，并在两端开启共享。") }
+                            item { Empty("尚未发现设备", "让电脑与手机连接同一 Wi-Fi，手机打开后会自动共享。") }
                         items(data.peers, key = { it.hello.deviceId }) { p ->
                             Card(
                                 colors =

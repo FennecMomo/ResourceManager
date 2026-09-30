@@ -81,6 +81,8 @@ class ChatUiTest {
       compose.onAllNodesWithText("设计电脑").fetchSemanticsNodes().isNotEmpty()
     }
     render("messages")
+    compose.onNodeWithText("开启").assertDoesNotExist()
+    compose.onNodeWithText("停止").assertDoesNotExist()
     compose.runOnIdle { requested = "ui-a" }
     compose.onNode(hasSetTextAction()).performSemanticsAction(SemanticsActions.SetText) {
       it(AnnotatedString("第一行\n第二行\n第三行\n第四行\n第五行\n第六行"))

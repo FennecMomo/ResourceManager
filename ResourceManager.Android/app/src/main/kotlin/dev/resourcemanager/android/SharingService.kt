@@ -15,7 +15,13 @@ import kotlinx.coroutines.flow.combine
 class SharingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var destroyed = false
+    @Volatile
+    internal var listening = false
+        private set
+
+    @Volatile private var reportedState = "启动中"
     private val resourceGate = Any()
+    private val statusGate = Any()
     private var worker: Job? = null
     private var server: PeerServer? = null
     private var socket: DatagramSocket? = null
@@ -74,16 +80,29 @@ class SharingService : Service() {
     }
 
     private fun state(text: String) {
-        if (destroyed) return
-        app.serviceState.value = text
+        synchronized(statusGate) {
+            if (destroyed || app.sharingService !== this) return
+            reportedState = text
+            reportState()
+        }
         getSystemService(NotificationManager::class.java).notify(1, notification(text))
         app.diagnostic("service", text)
         app.changed()
     }
 
+    internal fun reportState() {
+        synchronized(statusGate) {
+            if (app.sharingService !== this) return
+            app.sharing.value = listening && !destroyed
+            app.serviceState.value = if (destroyed) "已停止" else reportedState
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         startForeground(1, notification("启动中"))
+        app.sharingService = this
+        state("启动中")
         app.diagnostic("service", "created")
         androidx.core.content.ContextCompat.registerReceiver(
             this,
@@ -140,7 +159,7 @@ class SharingService : Service() {
                                 socket = udp
                             }
                             val udp = requireNotNull(socket)
-                            app.sharing.value = true
+                            listening = true
                             state(
                                 if (
                                     power.isDeviceIdleMode &&
@@ -150,7 +169,8 @@ class SharingService : Service() {
                                 else "共享中"
                             )
                             coroutineScope {
-                                // Let collectLatest subscribe before starting the blocking UDP loop.
+                                // Let collectLatest subscribe before starting the blocking UDP
+                                // loop.
                                 yield()
                                 launch {
                                     while (isActive) {
@@ -170,10 +190,10 @@ class SharingService : Service() {
                                     }
                                     val query =
                                         runCatching {
-                                                wire.decodeFromString<Discovery>(
-                                                    String(packet.data, 0, packet.length)
-                                                )
-                                            }
+                                            wire.decodeFromString<Discovery>(
+                                                String(packet.data, 0, packet.length)
+                                            )
+                                        }
                                             .getOrNull() ?: continue
                                     if (
                                         query.protocol != "ResourceManager.LanDiscovery.v1" ||
@@ -230,13 +250,18 @@ class SharingService : Service() {
             return START_NOT_STICKY
         }
         app.sharingWanted.value = true
+        // Re-entering the app also restores foreground status if the service was demoted.
+        startForeground(1, notification(reportedState))
         startWorker()
+        reportState()
         return START_STICKY
     }
 
     private fun release() =
         synchronized(resourceGate) {
-            val ownedResources = socket != null || server != null || multicast != null || cpu != null
+            listening = false
+            val ownedResources =
+                socket != null || server != null || multicast != null || cpu != null
             socket?.close()
             socket = null
             server?.stop()
@@ -247,7 +272,7 @@ class SharingService : Service() {
             cpu = null
             // A cancelled old worker may finish after the next service instance starts.
             // Releasing its already-cleared resources must not mark the new instance offline.
-            if (ownedResources) app.sharing.value = false
+            if (ownedResources) reportState()
             app.diagnostic("locks", "released")
         }
 
@@ -255,10 +280,14 @@ class SharingService : Service() {
         destroyed = true
         scope.cancel()
         release()
-        app.client.cancelPending()
-        app.downloads.pauseAll()
+        if (app.sharingService === this) {
+            app.sharingService = null
+            app.sharing.value = false
+            app.serviceState.value = "已停止"
+            app.client.cancelPending()
+            app.downloads.pauseAll()
+        }
         unregisterReceiver(receiver)
-        app.serviceState.value = "已停止"
         app.changed()
         app.diagnostic("service", "destroyed")
         super.onDestroy()
