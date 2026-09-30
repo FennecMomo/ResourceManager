@@ -639,7 +639,8 @@ public partial class MainWindow : Window
             ("下载", "查看传输进度，继续中断的任务"),
             ("反馈", "向维护者提交问题、建议和使用体验"),
             ("设置", "管理资料、连接方式和运行偏好"),
-            ("服务器", "通过公网地址加入服务器，查看在线设备")
+            ("服务器", "通过公网地址加入服务器，查看在线设备"),
+            ("更新历程", "沿着时间轴回看每个版本的功能新增与变化")
         };
         var page = pages[Math.Clamp(Tabs.SelectedIndex, 0, pages.Length - 1)];
         PageTitleText.Text = page.Title;

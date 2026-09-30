@@ -55,6 +55,53 @@ internal static class Program
                 var buttonLeft = button.TranslatePoint(new Point(0, 0), header).X;
                 Require(button.ActualWidth >= 70 && identityRight + 10 <= buttonLeft, "help button and local identity do not overlap at minimum window size");
 
+                var navigation = (ListBox)main.FindName("NavList");
+                var tabs = (TabControl)main.FindName("Tabs");
+                navigation.SelectedIndex = 9;
+                root.UpdateLayout();
+                Require(tabs.SelectedIndex == 9 && ((TextBlock)main.FindName("PageTitleText")).Text == "更新历程",
+                    "history navigation selects its page without shifting existing modules");
+                Require(((TabItem)tabs.Items[7]).Header.ToString() == "设置" && ((TabItem)tabs.Items[8]).Header.ToString() == "服务器",
+                    "settings and server navigation indexes stay consistent");
+                var history = (ReleaseHistoryView)main.FindName("ReleaseHistory");
+                var versions = history.Entries.Select(e => Version.Parse(e.Version)).ToArray();
+                Require(versions.Length == versions.Distinct().Count() && versions.SequenceEqual(versions.OrderDescending()) &&
+                    history.Entries[0].Version == history.CurrentVersion,
+                    "embedded history is unique, newest first and includes the built client version");
+                Require(history.Entries.All(e => DateOnly.TryParseExact(e.Date, "yyyy-MM-dd", out _) && e.Changes.Length > 0 &&
+                    e.Changes.All(c => !string.IsNullOrWhiteSpace(c.Text) && c.Kind is "新增" or "改进" or "修复")),
+                    "history contains dated feature changes with readable categories");
+                var historySearch = (TextBox)history.FindName("HistorySearch");
+                historySearch.Text = "MCP";
+                Require(history.VisibleEntries.Count > 0 && history.VisibleEntries.All(e =>
+                    e.Entry.Title.Contains("MCP") || e.Entry.Changes.Any(c => c.Text.Contains("MCP"))),
+                    "feature search finds relevant versions without a network request");
+                historySearch.Text = "0.6.8";
+                Require(history.VisibleEntries.Count == 1 && history.VisibleEntries[0].Entry.Version == "0.6.8" &&
+                    history.VisibleEntries[0].TopLineVisibility == Visibility.Collapsed && history.VisibleEntries[0].BottomLineVisibility == Visibility.Collapsed,
+                    "version search produces a standalone timeline card");
+                historySearch.Text = "no-matching-history-fixture";
+                Require(history.VisibleEntries.Count == 0 && ((FrameworkElement)history.FindName("HistoryEmpty")).Visibility == Visibility.Visible,
+                    "unmatched history search shows an empty state");
+                historySearch.Text = "";
+                Require(history.VisibleEntries.Count == history.Entries.Count && history.VisibleEntries[0].CurrentVisibility == Visibility.Visible,
+                    "clearing search restores the timeline and current-version badge");
+                identity.Text = "示例电脑";
+                ((TextBlock)main.FindName("AddressText")).Text = "192.168.1.10 : 37642";
+                foreach (var size in new[] { new Size(1010, 670), new Size(1260, 820) })
+                {
+                    root.Measure(size);
+                    root.Arrange(new Rect(size));
+                    root.UpdateLayout();
+                    navigation.ScrollIntoView(navigation.Items[9]);
+                    Require(history.ActualWidth > 500 && history.ActualHeight > 300 &&
+                        !main.IsVisible && ((ListBox)history.FindName("HistoryList")).ActualHeight > 250,
+                        "history lays out at minimum and normal sizes without showing a window");
+                    if (args.Contains("--render-preview")) SavePreview(root, size,
+                        Path.Combine("dist", "help-checks", $"history-{(int)size.Width}.png"));
+                }
+                navigation.SelectedIndex = 0;
+
                 var help = new HelpWindow();
                 var expected = new[] { "设备", "我的发布", "Git 协作", "聊天", "收藏", "下载", "反馈", "设置", "服务器", "MCP 与 AI" };
                 Require(help.Chapters.Select(c => c.Title).SequenceEqual(expected), "all modules and MCP have matching help chapters");
@@ -132,5 +179,21 @@ internal static class Program
     {
         if (!condition) throw new InvalidOperationException(message);
         checks++;
+    }
+
+    private static void SavePreview(FrameworkElement root, Size size, string path)
+    {
+        var bitmap = new RenderTargetBitmap((int)size.Width, (int)size.Height, 96, 96, PixelFormats.Pbgra32);
+        var background = new DrawingVisual();
+        using (var dc = background.RenderOpen())
+            dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(246, 248, 251)), null, new Rect(size));
+        bitmap.Render(background);
+        bitmap.Render(root);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        using var file = File.Create(path);
+        encoder.Save(file);
+        Console.WriteLine($"Offscreen history preview: {Path.GetFullPath(path)}");
     }
 }
