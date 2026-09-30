@@ -59,6 +59,35 @@ internal static partial class Program
         store.RemovePeer(slowId);
         grid.SelectedItem = window.Peers.Single(row => row.Peer.DeviceId == peer.DeviceId);
         Require(window.RemoteResources.Any(row => row.Resource.Id == resource.Id), "online peer and resources appear after refresh");
+        // The LAN lane must not sit behind twenty stalled saved endpoints.
+        var stalls = new List<TcpListener>();
+        var ids = new List<string>();
+        for (var index = 0; index < 20; index++) {
+            var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); stalls.Add(listener);
+            var id = "slow-lane-" + index; ids.Add(id);
+            store.UpsertPeer(new PeerInfo(id, "127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port, "历史慢设备" + index, null, null));
+        }
+        var seam = typeof(MainWindow).GetField("isolatedDeviceDiscovery", Private)!;
+        seam.SetValue(window, (Func<CancellationToken, Action<DiscoveredPeer>, Task>)(async (token, callback) => {
+            await Task.Delay(30, token);
+            callback(new DiscoveredPeer(peer.DeviceId, "127.0.0.1", port, "快速局域网设备"));
+            callback(new DiscoveredPeer(peer.DeviceId, "127.0.0.1", port, "快速局域网设备"));
+        }));
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        try {
+            var refresh = (Task)typeof(MainWindow).GetMethod("RefreshDevicesAsync", Private)!.Invoke(window, [false])!;
+            await Task.Delay(1000);
+            Require(window.Peers.Any(row => row.Peer.DeviceId == peer.DeviceId && row.Status == "在线"),
+                "LAN healthy peer confirms within one second with twenty stalled historical endpoints");
+            Require(!refresh.IsCompleted, "history probes continue independently of the confirmed LAN result");
+            await refresh;
+            Require(elapsed.Elapsed < TimeSpan.FromSeconds(9), "foreground discovery completes within its eight-second budget");
+            Console.WriteLine($"Discovery performance: twenty stalls, foreground {elapsed.ElapsedMilliseconds} ms; healthy peer <= 1000 ms");
+        } finally {
+            seam.SetValue(window, null);
+            stalls.ForEach(listener => listener.Stop()); ids.ForEach(id => store.RemovePeer(id));
+        }
+        await (Task)typeof(MainWindow).GetField("deviceDetailsRefresh", Private)!.GetValue(window)!;
         await node.StopAsync();
         await Refresh();
         Require(window.Peers.Single(row => row.Peer.DeviceId == peer.DeviceId).Status == "离线",

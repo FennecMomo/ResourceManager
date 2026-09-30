@@ -24,7 +24,7 @@ $gradle = Join-Path $toolRoot 'gradle/gradle-8.13/bin/gradle.bat'
 if (!(Test-Path $gradle)) { $gradle = Join-Path $projectRoot 'gradlew.bat' }
 $tasks = @(':protocol:test', ':app:assembleDebug', ':app:lintDebug')
 if ($DeviceTests) { $tasks += ':app:assembleDebugAndroidTest' }
-& $gradle -p $projectRoot @tasks --console=plain
+& $gradle -p $projectRoot @tasks --console=plain '-Pkotlin.compiler.execution.strategy=in-process'
 if ($LASTEXITCODE -ne 0) { throw 'Android build/checks failed.' }
 $apk = Join-Path $projectRoot 'app/build/outputs/apk/debug/app-debug.apk'
 if ($DeviceTests) {

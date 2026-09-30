@@ -24,6 +24,10 @@ class Store(context: Context): SQLiteOpenHelper(context,"resource-manager.db",nu
     fun peers() = all("peer").map { wire.decodeFromString<Peer>(it) }
     fun peer(id: String) = get("peer",id)?.let { wire.decodeFromString<Peer>(it) }
     @Synchronized fun savePeer(peer: Peer) { val old = peer(peer.hello.deviceId); require(old == null || old.key == peer.key) { "设备密钥已改变" }; put("peer",peer.hello.deviceId,wire.encodeToString(peer)) }
+    @Synchronized fun markPeerFailure(id: String, expectedSeen: Long?, error: String) {
+        val current = peer(id) ?: return
+        if(current.lastSeen == expectedSeen) savePeer(current.copy(error=error))
+    }
     fun publications() = all("publication").map { wire.decodeFromString<Publication>(it) }
     fun publication(id: String) = get("publication",id)?.let { wire.decodeFromString<Publication>(it) }
     fun save(p: Publication) = put("publication",p.id,wire.encodeToString(p))
@@ -53,5 +57,9 @@ class Store(context: Context): SQLiteOpenHelper(context,"resource-manager.db",nu
         save(m); return true
     }
     fun transfers() = all("transfer").map { wire.decodeFromString<Transfer>(it) }
+    @Synchronized fun updateRunning(t: Transfer) {
+        val current = get("transfer",t.id)?.let {wire.decodeFromString<Transfer>(it)} ?: return
+        if(current.state == "Running") save(t)
+    }
     fun save(t: Transfer) = put("transfer",t.id,wire.encodeToString(t))
 }

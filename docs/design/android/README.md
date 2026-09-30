@@ -1,7 +1,7 @@
 # ResourceManager Android 架构审查包
 
 - 文档版本：D1，2026-09-29。
-- 状态：保留 D1 设计基线；用户在独立审查工具无法连接后授权直接实施，Android 0.1.0 测试版已进入交付。实际实现和验证以[实施记录](../../../ResourceManager.Android/validation.md)为准。
+- 状态：保留 D1 设计基线；Android 0.1.1 / Windows 0.7.5 按 2026-09-30 修订计划修复互通、发现和后台共享并重做聊天界面。实际实现、覆盖升级证据及待完成的真机熄屏验证以[实施记录](../../../ResourceManager.Android/validation.md)为准。
 - 代码基线：`434442b8fbdeb65bb8ff5368273fd1a5d6f6ac5a`，Windows 客户端 0.7.4。
 - 分支：`codex/git-collaboration`。
 - 需求来源：本机反馈服务端“开发手机版”，Issue `7fee3e9fb3ae4ad3a39b740493bb80db`。
@@ -40,4 +40,4 @@
 
 ## 本轮实际完成范围
 
-D1 提交仅包含设计文档。后续实现新增 `ResourceManager.Android/`、构建脚本与双向互通测试，已有可安装 APK 和 API 36 无窗口模拟器运行结果；没有改变 Windows/服务端生产运行逻辑。请结合[客户端说明](../../../ResourceManager.Android/README.md)与[实施记录](../../../ResourceManager.Android/validation.md)区分已验证能力和仍待真实手机反馈的部分。
+D1 提交仅包含设计文档。后续实现新增 Android 客户端、构建脚本与双向互通测试，已有可安装 APK 和 API 36 无窗口模拟器运行结果。0.1.1 重做聊天入口、修复头像签名和通用后台共享，配套 Windows 0.7.5 并行发现；服务端生产逻辑保持原版本。请结合[客户端说明](../../../ResourceManager.Android/README.md)与[实施记录](../../../ResourceManager.Android/validation.md)区分已验证能力和仍待真实手机反馈的部分。

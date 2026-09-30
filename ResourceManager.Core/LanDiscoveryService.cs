@@ -43,7 +43,8 @@ public sealed class LanDiscoveryService(NodeStore store, int discoveryPort = Nod
     public async Task<IReadOnlyList<DiscoveredPeer>> DiscoverAsync(
         TimeSpan duration,
         CancellationToken cancellationToken = default,
-        IEnumerable<IPAddress>? broadcastAddresses = null)
+        IEnumerable<IPAddress>? broadcastAddresses = null,
+        Action<DiscoveredPeer>? peerFound = null)
     {
         if (duration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(duration));
         var settings = store.GetSettings();
@@ -67,7 +68,19 @@ public sealed class LanDiscoveryService(NodeStore store, int discoveryPort = Nod
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(duration);
+        async Task RepeatAsync()
+        {
+            try {
+                await Task.Delay(TimeSpan.FromSeconds(1), timeout.Token).ConfigureAwait(false);
+                foreach (var address in targets) {
+                    try { await udp.SendAsync(request, new IPEndPoint(address, discoveryPort), timeout.Token).ConfigureAwait(false); }
+                    catch (SocketException) { }
+                }
+            } catch (OperationCanceledException) { }
+        }
+        var repeat = RepeatAsync();
         var found = new Dictionary<string, DiscoveredPeer>(StringComparer.Ordinal);
+        try {
         while (true)
         {
             UdpReceiveResult response;
@@ -79,9 +92,13 @@ public sealed class LanDiscoveryService(NodeStore store, int discoveryPort = Nod
             var address = response.RemoteEndPoint.Address;
             if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
             if (address.AddressFamily != AddressFamily.InterNetwork) continue;
-            found[packet.DeviceId] = new DiscoveredPeer(
-                packet.DeviceId, address.ToString(), packet.Port, packet.Nickname.Trim());
+            var peer = new DiscoveredPeer(packet.DeviceId, address.ToString(), packet.Port, packet.Nickname.Trim());
+            if (!found.TryGetValue(packet.DeviceId, out var previous) || previous != peer) {
+                found[packet.DeviceId] = peer;
+                peerFound?.Invoke(peer);
+            }
         }
+        } finally { timeout.Cancel(); await repeat.ConfigureAwait(false); }
         return found.Values.OrderBy(peer => peer.Nickname, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
 

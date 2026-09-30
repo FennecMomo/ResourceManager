@@ -3,7 +3,7 @@
     "deviceId": "windows-fixture",
     "nickname": "\u4E2D\u6587 \u0022A\u0022 \u002B \u003C\u003E\u0026\u0027\u0060 \uD83D\uDE00",
     "port": 37642,
-    "avatar": null,
+    "avatar": "++//+g==",
     "capabilities": [
       "signed-device-v1",
       "resource-groups-v1",
@@ -13,22 +13,54 @@
       "reminder-v1"
     ]
   },
-  "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFRoEV5cN\u002B/uqdu9H\u002B\u002BE8LpnytD1l1ZVNt3rYlNV7wLPtWGlZbWb/1O/jxH4TcqCqBWlJlrHd9VNdgmUShKJMMA==",
+  "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE4IVKxEtKW23vehUu58YRI0MbfTnXKWrv9jXHmWq9qisF0Lh7vQpE7UHDXGewnHLf/TlzG0qtiwWm0GupcR10Bg==",
+  "avatarVectors": [
+    {
+      "size": -1,
+      "digest": "2B04CBE35A1E2782FBA7153FDB90E1F69A933A35A14FE67D51FC6F83165408C1",
+      "signature": "OVvj2lWKFYUxFMjFa/qhklFzOprd1pImuQ1ZvXTA7a0MS6HanCFGcxRXglkQtscdetPID8DZjXDiEx2ioGKZ8w=="
+    },
+    {
+      "size": 0,
+      "digest": "1106B60FBC7E5803D8805B52D86420C98B9DB2DAE319FD59F7065F6AC997E7AF",
+      "signature": "pNelXfOl59cAuwWcUMkNtSQv13uvkxiX9hmN\u002Bw4ivpBPE4wweM7bcRdD/Zj5nNLwnYPNVRSFQmXipXBQHqkp3A=="
+    },
+    {
+      "size": 1,
+      "digest": "660F2B0978625B0DD4141275A8F745CC4D5BF207EC3A9EF872FE6EC9E72F0E79",
+      "signature": "\u002BRkbBzUZL5ILCWK3yx7yRrEgx9rBkyaHAQne3PuWerbXa1N1abQGO9Z2JtMy3YE0S\u002BL8EoOlS57yjWsdzyYQtw=="
+    },
+    {
+      "size": 2,
+      "digest": "63A8C73545E022E2F9D156A8D31BB79C08E776ECB5F916BA401C0C7E3BAFBFFC",
+      "signature": "OzqSxqA8SpAgUNuazJ86c4pM92M70lTUgARcNic4hmiExphGpSC/g8otFbqEmlEqulLxeIwdEtvQCNkhM1temA=="
+    },
+    {
+      "size": 3,
+      "digest": "7B619A60372CD04960D1A41B3F5BA7AAEF056EA61241EC549322B99E9C918FB8",
+      "signature": "byRv4D1QSA3vdQIdDQPLcbuCISyrkCxluBGcLF6YRXsHNjivMtxkuaVs5e4XObfUNQu1kZ\u002BhtDDL5Dybij6urw=="
+    },
+    {
+      "size": 524288,
+      "digest": "19135DA599BFACF1593202A80B1C7B0A2852BD512CAB9CA61E0B5A566F7305BE",
+      "signature": "8gqsLYwKIojFbEEmLrv75qQMf0Oe/hzXHjzONLLpEP7z4rsNtfvWRWU5BqRTOrpxQczPw1aMITEEwU7kpB2WTg=="
+    }
+  ],
   "vectors": [
     {
       "name": "hello",
-      "payload": "[\u0022signed-device-hello-v1\u0022,\u0022android-fixture\u0022,\u0022ABC123\u0022,\u0022{\\u0022deviceId\\u0022:\\u0022windows-fixture\\u0022,\\u0022nickname\\u0022:\\u0022\\\\u4E2D\\\\u6587 \\\\u0022A\\\\u0022 \\\\u002B \\\\u003C\\\\u003E\\\\u0026\\\\u0027\\\\u0060 \\\\uD83D\\\\uDE00\\u0022,\\u0022port\\u0022:37642,\\u0022avatar\\u0022:null,\\u0022capabilities\\u0022:[\\u0022signed-device-v1\\u0022,\\u0022resource-groups-v1\\u0022,\\u0022resource-access-v1\\u0022,\\u0022chat-v1\\u0022,\\u0022chat-private-resource-v1\\u0022,\\u0022reminder-v1\\u0022]}\u0022]",
-      "signature": "tY1/T\u002BuOHJ5IYdM07wqbJo\u002Bu\u002BVcI5e1KMGYF73mRsm9D0RPyZpDid3z4llJ2slNQDDTC8lk65bwYJqXrI\u002BxaRg=="
+      "payload": "[\u0022signed-device-hello-v1\u0022,\u0022android-fixture\u0022,\u0022ABC123\u0022,\u0022{\\u0022deviceId\\u0022:\\u0022windows-fixture\\u0022,\\u0022nickname\\u0022:\\u0022\\\\u4E2D\\\\u6587 \\\\u0022A\\\\u0022 \\\\u002B \\\\u003C\\\\u003E\\\\u0026\\\\u0027\\\\u0060 \\\\uD83D\\\\uDE00\\u0022,\\u0022port\\u0022:37642,\\u0022avatar\\u0022:\\u0022\\u002B\\u002B//\\u002Bg==\\u0022,\\u0022capabilities\\u0022:[\\u0022signed-device-v1\\u0022,\\u0022resource-groups-v1\\u0022,\\u0022resource-access-v1\\u0022,\\u0022chat-v1\\u0022,\\u0022chat-private-resource-v1\\u0022,\\u0022reminder-v1\\u0022]}\u0022]",
+      "signature": "l\u002BHJpM8DfTP3mNaIgHQ//SYJzpuYa3MsiuNtmSXswy4aR1uiTAXcATJpPtoB\u002BX8WtfCYxokTreYM4q/h6CVkDg=="
     },
     {
       "name": "request",
       "payload": "[\u0022signed-device-v1\u0022,\u0022android-fixture\u0022,\u0022windows-fixture\u0022,\u0022GET\u0022,\u0022/api/v1/resources/a/content?path=%E4%B8%AD\\nbytes=3-\\n\\u0022etag\\u0022\u0022,\u00221700000000\u0022,\u0022AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\u0022,\u0022FCC79F802F0F67FBCC2AC4EB42F1D327E83B232046195EE1D6CC735B7ABDFD07\u0022]",
-      "signature": "o5rG4EbcnTDa\u002BvSWpAjAjvKfosrEjVr1CzWTdsHlJ5uLkatXiz9NzqyMklLhW8dnTb2Jx291WID8FfZQAGE5ZA=="
+      "signature": "Xx0YuyCoftW8vb99YGv8FsCeZT/jeuyxg5PGhL1002AQFaqGs\u002BKtUwXhqcmUzDID8RS/PGSA/2w0WdOvqHO19Q=="
     },
     {
       "name": "escaping",
       "payload": "[\u0022\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000B\\f\\r\\u000E\\u000F\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001A\\u001B\\u001C\\u001D\\u001E\\u001F !\\u0022#$%\\u0026\\u0027()*\\u002B,-./0123456789:;\\u003C=\\u003E?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\\\]^_\\u0060abcdefghijklmnopqrstuvwxyz{|}~\\u007F\\u4E2D\\u6587\\uD83D\\uDE00\\u2028\\u2029\u0022]",
-      "signature": "GrpEHTfgKIFJXOGMfqbtCWaCPIXGBpUezX3EmsHuuzOg1pnEli1ya89EkGfAqmelLuyElhOUQ\u002BqUfj5QATD07w=="
+      "signature": "PiOkrS2Qjo1O\u002BN3q7MjH2uDiyHUjyZoz8ctS4p3BuxcEK1eiQZwkzXGkh57A6RKMJyffZkEEl6tGQrWYY5qtyA=="
     }
   ]
 }

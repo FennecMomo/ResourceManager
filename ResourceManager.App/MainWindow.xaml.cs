@@ -43,6 +43,10 @@ public partial class MainWindow : Window
     private readonly MemoryStream iconStream;
     private readonly System.Drawing.Icon appIcon;
     private readonly Dictionary<string, string> peerStatus = [];
+    private readonly Dictionary<string, long> peerProbeEpochs = [];
+    private readonly Dictionary<string, (DiscoveredPeer Peer, string Status)> discoveryCandidates = [];
+    private Func<CancellationToken, Action<DiscoveredPeer>, Task>? isolatedDeviceDiscovery = null;
+    private long NextPeerProbe(string id) => peerProbeEpochs[id] = peerProbeEpochs.GetValueOrDefault(id) + 1;
     private readonly Dictionary<string, IReadOnlyList<RemoteResource>> peerCatalogs = [];
     private readonly Dictionary<string, string[]> peerCapabilities = [];
     private readonly HashSet<string> openReminders = [];
@@ -381,6 +385,12 @@ public partial class MainWindow : Window
                 peerStatus.GetValueOrDefault(peer.DeviceId, "未检查"),
                 AvatarImage(peer.Avatar), source, notes.GetValueOrDefault(peer.DeviceId, "")));
         }
+        foreach (var (id, candidate) in discoveryCandidates) {
+            if (store.GetPeer(id) is not null) continue;
+            var peer = candidate.Peer;
+            Peers.Add(new PeerRow(new PeerInfo(id, peer.Ip, peer.Port, peer.Nickname, null, null),
+                candidate.Status, null, "局域网 · 待身份确认", ""));
+        }
         PeersGrid.SelectedItem = Peers.FirstOrDefault(p => p.Peer.DeviceId == selected);
         RefreshSelectedResources();
     }
@@ -514,6 +524,7 @@ public partial class MainWindow : Window
     private async Task RefreshPeerAsync(PeerInfo peer, PeerEndpointKind? kind)
     {
         if (kind == PeerEndpointKind.Gateway && peerStatus.GetValueOrDefault(peer.DeviceId) == "在线") return;
+        var epoch = NextPeerProbe(peer.DeviceId);
         var candidates = store.GetPeerEndpoints(peer.DeviceId)
             .Where(item => item.Source != "DeviceChanged" && (kind is null || item.Kind == kind))
             .GroupBy(item => (item.Ip, item.Port))
@@ -539,12 +550,14 @@ public partial class MainWindow : Window
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("另一台设备") || ex.Message.Contains("另一台"))
             {
+                if (peerProbeEpochs.GetValueOrDefault(peer.DeviceId) != epoch) return;
                 store.MarkEndpointDeviceChanged(endpoint);
                 peerStatus[peer.DeviceId] = "设备已变更";
                 continue;
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("身份"))
             {
+                if (peerProbeEpochs.GetValueOrDefault(peer.DeviceId) != epoch) return;
                 peerStatus[peer.DeviceId] = "身份校验失败";
                 continue;
             }
@@ -556,6 +569,7 @@ public partial class MainWindow : Window
                 endpointFailures[circuitKey] = (count, count >= 2 ? DateTimeOffset.UtcNow.AddSeconds(45) : DateTimeOffset.MinValue);
                 continue;
             }
+            if (peerProbeEpochs.GetValueOrDefault(peer.DeviceId) != epoch) return;
             if (peerStatus.GetValueOrDefault(peer.DeviceId) != "在线") store.WakeChatMessages(peer.DeviceId);
             peerStatus[peer.DeviceId] = "在线";
             RefreshPeersView();
@@ -564,6 +578,7 @@ public partial class MainWindow : Window
                 using var deadline = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token);
                 deadline.CancelAfter(TimeSpan.FromSeconds(6));
                 var catalog = await client.GetCatalogAfterProbeAsync(candidate, hello, deadline.Token);
+                if (peerProbeEpochs.GetValueOrDefault(peer.DeviceId) != epoch) return;
                 peerCatalogs[peer.DeviceId] = catalog.Resources;
                 peerResourceGroups[peer.DeviceId] = catalog.Groups;
                 peerCapabilities[peer.DeviceId] = catalog.Hello.Capabilities ?? [];
@@ -594,6 +609,7 @@ public partial class MainWindow : Window
             RefreshPeersView();
             return;
         }
+        if (peerProbeEpochs.GetValueOrDefault(peer.DeviceId) != epoch) return;
         var hasAvailableEndpoint = store.GetPeerEndpoints(peer.DeviceId)
             .Any(item => item.Source != "DeviceChanged");
         if (peerStatus.GetValueOrDefault(peer.DeviceId) != "身份校验失败" &&
@@ -714,37 +730,105 @@ public partial class MainWindow : Window
                 foreach (var peer in store.GetPeers()) peerStatus[peer.DeviceId] = "未检查";
                 RefreshPeersView();
             }
-            SetStatus("正在检查已保存的直连设备…");
+            foreach (var server in Servers) StartServer(server);
+            SetStatus("正在并行发现局域网与已保存设备…");
+            discoveryCandidates.Clear();
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token);
+            budget.CancelAfter(TimeSpan.FromSeconds(8));
+            var probes = new Dictionary<string, Task>(StringComparer.OrdinalIgnoreCase);
+            using var savedGate = new SemaphoreSlim(4);
+            using var lanGate = new SemaphoreSlim(4);
+            Task ProbeAsync(string ip, int port, string id, SemaphoreSlim gate, bool discovered = false)
+            {
+                var key = $"{id}|{ip}|{port}";
+                if (probes.TryGetValue(key, out var ongoing) && !ongoing.IsCompleted) return ongoing;
+                return probes[key] = RunAsync();
+                async Task RunAsync()
+                {
+                    var epoch = NextPeerProbe(id);
+                    var success = false;
+                    var attempted = false;
+                    try {
+                        if (!discovered && endpointFailures.TryGetValue(key, out var cold) && cold.RetryAfter > DateTimeOffset.UtcNow) return;
+                        await gate.WaitAsync(budget.Token);
+                        try {
+                            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(budget.Token);
+                            deadline.CancelAfter(TimeSpan.FromSeconds(3));
+                            attempted = true;
+                            var peer = await client.ConnectAsync(ip, port, id, deadline.Token);
+                            if (peerProbeEpochs.GetValueOrDefault(id) != epoch) return;
+                            success = true;
+                            endpointFailures.Remove(key);
+                            discoveryCandidates.Remove(id);
+                            peerStatus[id] = "在线";
+                            RefreshPeersView();
+                        } finally { gate.Release(); }
+                    } catch (OperationCanceledException) when (!exiting) { }
+                    catch (Exception ex) {
+                        if (peerProbeEpochs.GetValueOrDefault(id) != epoch) return;
+                        if (ex is InvalidOperationException && ex.Message.Contains("另一台")) {
+                            var changed = store.GetPeerEndpoints(id).FirstOrDefault(e => e.Ip == ip && e.Port == port);
+                            if (changed is not null) store.MarkEndpointDeviceChanged(changed);
+                        }
+                        if (discoveryCandidates.TryGetValue(id, out var candidate))
+                            discoveryCandidates[id] = (candidate.Peer, ex.Message.Contains("身份") ? "身份校验失败" : "连接失败");
+                        AppLog.Write("设备身份探测未完成", ex);
+                    } finally {
+                        if (attempted && !success && peerProbeEpochs.GetValueOrDefault(id) == epoch) {
+                            var failure = endpointFailures.GetValueOrDefault(key);
+                            var count = failure.Failures + 1;
+                            endpointFailures[key] = (count, count >= 2 ? DateTimeOffset.UtcNow.AddSeconds(45) : DateTimeOffset.MinValue);
+                            if (store.GetPeer(id) is not null) peerStatus[id] = "离线";
+                            if (!budget.IsCancellationRequested) RefreshPeersView();
+                        }
+                    }
+                }
+            }
+            var channel = System.Threading.Channels.Channel.CreateUnbounded<DiscoveredPeer>();
+            async Task DiscoverAsync()
+            {
+                try {
+                    if (isolatedDeviceDiscovery is not null) await isolatedDeviceDiscovery(budget.Token, peer => channel.Writer.TryWrite(peer));
+                    else await discovery.DiscoverAsync(TimeSpan.FromSeconds(2.5), budget.Token,
+                        peerFound: peer => channel.Writer.TryWrite(peer));
+                }
+                catch (OperationCanceledException) when (!exiting) { }
+                catch (Exception ex) { AppLog.Write("局域网设备搜索失败", ex); }
+                finally { channel.Writer.TryComplete(); }
+            }
+            async Task ConsumeAsync()
+            {
+                var tasks = new List<Task>();
+                await foreach (var item in channel.Reader.ReadAllAsync()) {
+                    if (!discoveryCandidates.ContainsKey(item.DeviceId)) {
+                        discoveryCandidates[item.DeviceId] = (item, "正在验证");
+                        RefreshPeersView();
+                    }
+                    tasks.Add(ProbeAsync(item.Ip, item.Port, item.DeviceId, lanGate, discovered: true));
+                }
+                await Task.WhenAll(tasks);
+            }
+            var discoveryTask = DiscoverAsync();
+            var lanTask = ConsumeAsync();
+            var savedTasks = store.GetPeers().SelectMany(peer => store.GetPeerEndpoints(peer.DeviceId)
+                .Where(e => e.Kind == PeerEndpointKind.Direct && e.Source != "DeviceChanged")
+                .Select(e => ProbeAsync(e.Ip, e.Port, peer.DeviceId, savedGate))).ToArray();
+            await Task.WhenAll(savedTasks.Append(discoveryTask).Append(lanTask));
+            RefreshPeersView();
+            if (deviceDetailsRefresh.IsCompleted) deviceDetailsRefresh = Dispatcher.InvokeAsync(
+                () => RefreshDeviceDetailsAsync(includeGatewayScan), DispatcherPriority.Background).Task.Unwrap();
+            SetStatus("局域网发现已完成；资源目录、路由器与服务器在后台更新。");
+        }
+        catch (OperationCanceledException) when (exiting) { }
+        finally { deviceRefreshGate.Release(); }
+    }
+
+    private Task deviceDetailsRefresh = Task.CompletedTask;
+    private async Task RefreshDeviceDetailsAsync(bool includeGatewayScan)
+    {
+        try {
             await RefreshAllAsync(PeerEndpointKind.Direct);
 
-            SetStatus("正在搜索局域网设备…");
-            IReadOnlyList<DiscoveredPeer> found;
-            try { found = await discovery.DiscoverAsync(TimeSpan.FromSeconds(2), updateCancellation.Token); }
-            catch (OperationCanceledException) when (exiting) { return; }
-            catch (Exception ex) { AppLog.Write("局域网设备搜索失败", ex); found = []; }
-            using (var concurrency = new SemaphoreSlim(6))
-            {
-                var connects = found.Select(async item =>
-                {
-                    await concurrency.WaitAsync(updateCancellation.Token);
-                    try
-                    {
-                        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(updateCancellation.Token);
-                        deadline.CancelAfter(TimeSpan.FromSeconds(3));
-                        var peer = await client.ConnectAsync(item.Ip, item.Port, item.DeviceId, deadline.Token);
-                        endpointFailures.Remove($"{peer.DeviceId}|{peer.Ip}|{peer.Port}");
-                        peerStatus[peer.DeviceId] = "在线";
-                        RefreshPeersView();
-                        await RefreshPeerAsync(peer, PeerEndpointKind.Direct);
-                    }
-                    catch (OperationCanceledException) when (updateCancellation.IsCancellationRequested) { throw; }
-                    catch { }
-                    finally { concurrency.Release(); }
-                }).ToArray();
-                await Task.WhenAll(connects);
-            }
-
-            SetStatus("正在检查路由器入口…");
             await RefreshAllAsync(PeerEndpointKind.Gateway);
             if (includeGatewayScan)
             {
@@ -780,10 +864,8 @@ public partial class MainWindow : Window
             }
 
             foreach (var server in Servers) StartServer(server);
-            SetStatus($"本地设备已刷新，当前在线 {Peers.Count} 台；服务器名单在后台独立更新。");
-        }
-        catch (OperationCanceledException) when (exiting) { }
-        finally { deviceRefreshGate.Release(); }
+        } catch (OperationCanceledException) when (exiting) { }
+        catch (Exception ex) { AppLog.Write("后台设备资料更新失败", ex); }
     }
 
     private async void AddGateway_Click(object sender, RoutedEventArgs e)
