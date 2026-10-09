@@ -210,50 +210,20 @@ public partial class MainWindow
             SetStatus("对方版本不支持私发资源，请先升级到 0.4.4 或更新版本并刷新连接。");
             return;
         }
-        string path;
+        string[] paths;
         if (folder)
         {
             using var picker = new System.Windows.Forms.FolderBrowserDialog { Description = "选择私发文件夹（不会公开发布）" };
             if (picker.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
-            path = picker.SelectedPath;
+            paths = [picker.SelectedPath];
         }
         else
         {
-            var picker = new Microsoft.Win32.OpenFileDialog { Title = "选择私发文件（不会公开发布）", CheckFileExists = true };
+            var picker = new Microsoft.Win32.OpenFileDialog { Title = "选择私发文件（可多选，不会公开发布）", CheckFileExists = true, Multiselect = true };
             if (picker.ShowDialog(this) != true) return;
-            path = picker.FileName;
+            paths = picker.FileNames;
         }
-        preparingChatResource = true;
-        chatResourceCancellation = new CancellationTokenSource();
-        ChatPreparationPanel.Visibility = Visibility.Visible;
-        ChatPreparationText.Text = mode == PublishMode.Copy ? "正在统计并复制，可随时取消…" : "正在创建引用…";
-        var lastProgress = DateTime.MinValue;
-        var progress = new Progress<long>(bytes =>
-        {
-            if ((DateTime.UtcNow - lastProgress).TotalMilliseconds < 150) return;
-            lastProgress = DateTime.UtcNow;
-            ChatPreparationText.Text = $"已复制 {bytes / 1048576.0:F1} MiB";
-        });
-        RefreshChatHeader();
-        SetStatus(mode == PublishMode.Copy ? "正在准备私发副本…" : "引用原路径；移动或删除原文件后对方将无法下载。");
-        try
-        {
-            chatResourcePreparation = Task.Run(() => chat.QueuePrivateResource(peerId, path, mode, chatResourceCancellation.Token, progress));
-            await chatResourcePreparation;
-            if (exiting) return;
-            RefreshChatTimeline();
-            SetStatus("私发资源已加入聊天队列，不会出现在公开发布中。");
-            await PumpChatSafeAsync();
-        }
-        catch (OperationCanceledException) { SetStatus("已取消私发准备，未完成副本已清理。"); }
-        catch (Exception ex) { ShowError("私发资源失败", ex); }
-        finally
-        {
-            preparingChatResource = false; chatResourcePreparation = null;
-            chatResourceCancellation?.Dispose(); chatResourceCancellation = null;
-            ChatPreparationPanel.Visibility = Visibility.Collapsed;
-            RefreshChatHeader();
-        }
+        await SendPrivateChatBatchAsync(peerId, paths, mode);
     }
 
     private async void ChatPublishedResource_Click(object sender, RoutedEventArgs e)

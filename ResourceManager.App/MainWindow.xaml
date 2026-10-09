@@ -606,7 +606,7 @@
                                     </StackPanel></DataTemplate></ListBox.ItemTemplate>
                                 </ListBox>
                             </Grid></Border>
-                            <Border Grid.Column="2" Style="{StaticResource Card}" Padding="16"><Grid>
+                            <Border x:Name="ChatDropZone" Grid.Column="2" Style="{StaticResource Card}" Padding="16" AllowDrop="True" PreviewDragOver="ChatFiles_DragOver" PreviewDrop="ChatFiles_Drop"><Grid>
                                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/><RowDefinition Height="12"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                     <StackPanel><TextBlock x:Name="ChatPeerTitle" Text="选择一个设备开始聊天" Style="{StaticResource CardHeading}"/>
@@ -659,7 +659,7 @@
                                     </StackPanel>
                                     <TextBox x:Name="ChatInput" Style="{StaticResource ChatComposerStyle}" MinLines="1" MaxLines="5" MaxLength="2000" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Top" Padding="11,8" PreviewKeyDown="ChatInput_PreviewKeyDown" AutomationProperties.Name="聊天消息"/>
                                     <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <TextBlock Text="Enter 发送 · Shift+Enter 换行" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                        <TextBlock Text="Enter 发送 · Shift+Enter 换行 · 可拖入文件或文件夹" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/>
                                         <Button x:Name="ChatResourceButton" Grid.Column="1" Content="发送资源" Click="ChatResource_Click" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" IsEnabled="False"/>
                                         <Button x:Name="ChatSendButton" Grid.Column="2" Content="发送" Click="ChatSend_Click" Margin="8,0,0,0" IsEnabled="False"/>
                                     </Grid>
