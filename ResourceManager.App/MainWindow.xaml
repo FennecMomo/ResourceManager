@@ -632,7 +632,7 @@
                                                     <StackPanel>
                                                         <TextBlock Text="{Binding Body}" Foreground="{StaticResource Ink}" FontSize="14" TextWrapping="Wrap"/>
                                                         <StackPanel Orientation="Horizontal">
-                                                            <Button Content="取消发送" Click="ChatCancel_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding CancelVisibility}" Margin="0,6,7,0"/>
+                                                            <Button Content="{Binding CancelLabel}" Click="ChatCancel_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding CancelVisibility}" Margin="0,6,7,0"/>
                                                             <Button Content="重试" Click="ChatRetry_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding RetryVisibility}" Margin="0,6,7,0"/>
                                                             <Button Content="下载资源" Click="ChatDownload_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding DownloadVisibility}" Margin="0,6,0,0"/>
                                                         </StackPanel>
@@ -652,6 +652,10 @@
                                     </DataTemplate></ListBox.ItemTemplate>
                                 </ListBox>
                                 <StackPanel Grid.Row="4">
+                                    <StackPanel x:Name="ChatPreparationPanel" Orientation="Horizontal" Visibility="Collapsed" Margin="0,0,0,8">
+                                        <TextBlock x:Name="ChatPreparationText" VerticalAlignment="Center"/>
+                                        <Button Content="取消准备" Click="ChatPreparationCancel_Click" Style="{StaticResource QuietButton}" Margin="8,0,0,0"/>
+                                    </StackPanel>
                                     <TextBox x:Name="ChatInput" Style="{StaticResource ChatComposerStyle}" MinLines="1" MaxLines="5" MaxLength="2000" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Top" Padding="11,8" PreviewKeyDown="ChatInput_PreviewKeyDown" AutomationProperties.Name="聊天消息"/>
                                     <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                         <TextBlock Text="Enter 发送 · Shift+Enter 换行" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/>

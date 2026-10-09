@@ -365,9 +365,15 @@ public partial class MainWindow
                              .Select(item => item.Id).ToArray()) aiPrivateResourceOperations.Remove(old);
                 var operation = new AiPrivateResourceOperation(Guid.NewGuid().ToString("N"));
                 aiPrivateResourceOperations[operation.Id] = operation;
+                var mode = PublishMode.Copy;
+                if (args.TryGetProperty("mode", out var modeValue) &&
+                    (!Enum.TryParse(modeValue.GetString(), true, out mode) || !Enum.IsDefined(mode))) return new(false, "invalid_publish_mode");
                 preparingChatResource = true;
+                chatResourceCancellation = new CancellationTokenSource();
+                ChatPreparationPanel.Visibility = System.Windows.Visibility.Visible;
+                ChatPreparationText.Text = "MCP 正在准备私发资源，可取消…";
                 RefreshChatHeader();
-                _ = RunAiPrivateResourceAsync(operation, peerId, path);
+                _ = RunAiPrivateResourceAsync(operation, peerId, path, mode);
                 return new(true, Data: PrivateResourceOperationInfo(operation));
             }
 
@@ -411,11 +417,11 @@ public partial class MainWindow
         }
     }
 
-    private async Task RunAiPrivateResourceAsync(AiPrivateResourceOperation operation, string peerId, string path)
+    private async Task RunAiPrivateResourceAsync(AiPrivateResourceOperation operation, string peerId, string path, PublishMode mode)
     {
         try
         {
-            chatResourcePreparation = Task.Run(() => chat.QueuePrivateResource(peerId, path));
+            chatResourcePreparation = Task.Run(() => chat.QueuePrivateResource(peerId, path, mode, chatResourceCancellation!.Token));
             var message = await chatResourcePreparation;
             operation.MessageId = message.MessageId;
             operation.State = "Completed";
@@ -426,6 +432,7 @@ public partial class MainWindow
                 _ = PumpChatSafeAsync();
             }
         }
+        catch (OperationCanceledException) { operation.State = "Canceled"; }
         catch (Exception ex)
         {
             operation.Error = ex.Message;
@@ -436,6 +443,8 @@ public partial class MainWindow
         {
             preparingChatResource = false;
             chatResourcePreparation = null;
+            chatResourceCancellation?.Dispose(); chatResourceCancellation = null;
+            ChatPreparationPanel.Visibility = System.Windows.Visibility.Collapsed;
             if (!exiting) RefreshChatHeader();
         }
     }

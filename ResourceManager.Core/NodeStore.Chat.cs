@@ -271,7 +271,7 @@ public sealed partial class NodeStore
             using var command = Cmd(db, """
                 UPDATE chat_messages SET state=$state,next_attempt_utc=$next,error=$error,
                   received_utc=COALESCE($received,received_utc),attempts=attempts+$increment
-                WHERE peer_id=$peer AND message_id=$msg AND outgoing=1
+                WHERE peer_id=$peer AND message_id=$msg AND outgoing=1 AND state<>'Canceled'
                 """, "$state", state, "$next", nextAttempt?.ToString("O"), "$error", error,
                 "$received", received?.ToString("O"), "$increment", incrementAttempt ? 1 : 0,
                 "$peer", peerId, "$msg", messageId);

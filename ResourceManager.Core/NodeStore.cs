@@ -7,6 +7,7 @@ namespace ResourceManager.Core;
 public sealed partial class NodeStore
 {
     private readonly object gate = new();
+    private readonly object resourceCopyGate = new();
     private readonly string connectionString;
     public string DataDirectory { get; }
     public string LibraryDirectory => Path.Combine(DataDirectory, "library");
@@ -522,8 +523,17 @@ public sealed partial class NodeStore
         }
     }
 
-    public LocalResource AddResource(string sourcePath, PublishMode mode, string? privatePeer = null, string groupId = DefaultResourceGroupId)
+    public LocalResource AddResource(string sourcePath, PublishMode mode, string? privatePeer = null, string groupId = DefaultResourceGroupId,
+        CancellationToken cancellationToken = default, IProgress<long>? progress = null)
     {
+        lock (resourceCopyGate) return AddResourceCore(sourcePath, mode, privatePeer, groupId, cancellationToken, progress);
+    }
+
+    private LocalResource AddResourceCore(string sourcePath, PublishMode mode, string? privatePeer,
+        string groupId, CancellationToken cancellationToken, IProgress<long>? progress)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Enum.IsDefined(mode)) throw new ArgumentException("无效的发布方式。");
         if (privatePeer is null && !GetResourceGroups().Any(g => g.Id == groupId)) throw new ArgumentException("分组不存在。");
         if (privatePeer is not null && GetPeer(privatePeer) is null) throw new InvalidOperationException("设备已移除。");
         sourcePath = Path.GetFullPath(sourcePath);
@@ -541,15 +551,17 @@ public sealed partial class NodeStore
             if (StorageLocation.IsWithin(library, sourcePath) ||
                 sourcePath.Equals(library, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("不能把包含程序发布目录的文件夹复制到自身内部。");
-            var copyBytes = kind == ResourceKind.File ? new FileInfo(sourcePath).Length : MeasureCopyDirectory(sourcePath);
+            var copyBytes = kind == ResourceKind.File ? new FileInfo(sourcePath).Length : MeasureCopyDirectory(sourcePath, cancellationToken);
             StorageLocation.EnsureSpace(DataDirectory, copyBytes);
             var root = Path.Combine(library, id);
             storedPath = Path.Combine(root, name);
             Directory.CreateDirectory(root);
             try
             {
-                if (kind == ResourceKind.File) File.Copy(sourcePath, storedPath);
-                else CopyDirectory(sourcePath, storedPath);
+                long copied = 0;
+                if (kind == ResourceKind.File) CopyResourceFile(sourcePath, storedPath, cancellationToken, progress, ref copied);
+                else CopyDirectory(sourcePath, storedPath, cancellationToken, progress, ref copied);
+                cancellationToken.ThrowIfCancellationRequested();
             }
             catch { Directory.Delete(root, true); throw; }
         }
@@ -568,31 +580,48 @@ public sealed partial class NodeStore
         return resource;
     }
 
-    private static long MeasureCopyDirectory(string source)
+    private static long MeasureCopyDirectory(string source, CancellationToken cancellationToken)
     {
         long bytes = 0;
         foreach (var entry in Directory.EnumerateFileSystemEntries(source))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (Path.GetFileName(entry).Equals(".git", StringComparison.OrdinalIgnoreCase)) continue;
             var attributes = File.GetAttributes(entry);
             if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
             bytes = checked(bytes + ((attributes & FileAttributes.Directory) != 0
-                ? MeasureCopyDirectory(entry) : new FileInfo(entry).Length));
+                ? MeasureCopyDirectory(entry, cancellationToken) : new FileInfo(entry).Length));
         }
         return bytes;
     }
 
-    private static void CopyDirectory(string source, string target)
+    private static void CopyDirectory(string source, string target, CancellationToken cancellationToken, IProgress<long>? progress, ref long copied)
     {
         Directory.CreateDirectory(target);
         foreach (var entry in Directory.EnumerateFileSystemEntries(source))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (Path.GetFileName(entry).Equals(".git", StringComparison.OrdinalIgnoreCase)) continue;
             var attributes = File.GetAttributes(entry);
             if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
             var destination = Path.Combine(target, Path.GetFileName(entry));
-            if ((attributes & FileAttributes.Directory) != 0) CopyDirectory(entry, destination);
-            else File.Copy(entry, destination);
+            if ((attributes & FileAttributes.Directory) != 0) CopyDirectory(entry, destination, cancellationToken, progress, ref copied);
+            else CopyResourceFile(entry, destination, cancellationToken, progress, ref copied);
+        }
+    }
+
+    private static void CopyResourceFile(string source, string target, CancellationToken token, IProgress<long>? progress, ref long copied)
+    {
+        using var input = File.OpenRead(source);
+        using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        var buffer = new byte[1024 * 1024];
+        int count;
+        while ((count = input.Read(buffer)) > 0)
+        {
+            token.ThrowIfCancellationRequested();
+            output.Write(buffer, 0, count);
+            copied += count;
+            progress?.Report(copied);
         }
     }
 

@@ -72,6 +72,7 @@ public partial class MainWindow
     private readonly List<ChatToastWindow> chatToastWindows = [];
     private bool chatRefreshing;
     private bool preparingChatResource;
+    private CancellationTokenSource? chatResourceCancellation;
     private Task<ChatMessage>? chatResourcePreparation;
     public ObservableCollection<ChatConversationRow> ChatConversations { get; } = [];
     public ObservableCollection<ChatMessageRow> ChatMessages { get; } = [];
@@ -180,20 +181,26 @@ public partial class MainWindow
     private void ChatResource_Click(object sender, RoutedEventArgs e)
     {
         var menu = new System.Windows.Controls.ContextMenu { PlacementTarget = ChatResourceButton };
-        var file = new System.Windows.Controls.MenuItem { Header = "私发文件…" };
-        var folder = new System.Windows.Controls.MenuItem { Header = "私发文件夹…" };
+        foreach (var mode in new[] { PublishMode.Reference, PublishMode.Copy })
+        foreach (var folder in new[] { false, true })
+        {
+            var label = mode == PublishMode.Reference ? "引用（不占副本空间）" : "副本（复制到缓存）";
+            var item = new System.Windows.Controls.MenuItem { Header = $"私发{(folder ? "文件夹" : "文件")} · {label}…" };
+            item.Click += (_, _) => SendPrivateChatResource(folder, mode);
+            menu.Items.Add(item);
+        }
         var published = new System.Windows.Controls.MenuItem { Header = "发送已发布资源卡片…" };
-        file.Click += (_, _) => SendPrivateChatResource(false);
-        folder.Click += (_, _) => SendPrivateChatResource(true);
         published.Click += ChatPublishedResource_Click;
-        menu.Items.Add(file);
-        menu.Items.Add(folder);
         menu.Items.Add(new Separator());
         menu.Items.Add(published);
+        var cleanup = new System.Windows.Controls.MenuItem { Header = "清理中断残留（保留有效附件）" };
+        cleanup.Click += ChatCleanup_Click;
+        menu.Items.Add(new Separator());
+        menu.Items.Add(cleanup);
         menu.IsOpen = true;
     }
 
-    private async void SendPrivateChatResource(bool folder)
+    private async void SendPrivateChatResource(bool folder, PublishMode mode)
     {
         var peerId = SelectedChatPeerId;
         if (peerId is null || preparingChatResource || exiting) return;
@@ -216,19 +223,36 @@ public partial class MainWindow
             path = picker.FileName;
         }
         preparingChatResource = true;
+        chatResourceCancellation = new CancellationTokenSource();
+        ChatPreparationPanel.Visibility = Visibility.Visible;
+        ChatPreparationText.Text = mode == PublishMode.Copy ? "正在统计并复制，可随时取消…" : "正在创建引用…";
+        var lastProgress = DateTime.MinValue;
+        var progress = new Progress<long>(bytes =>
+        {
+            if ((DateTime.UtcNow - lastProgress).TotalMilliseconds < 150) return;
+            lastProgress = DateTime.UtcNow;
+            ChatPreparationText.Text = $"已复制 {bytes / 1048576.0:F1} MiB";
+        });
         RefreshChatHeader();
-        SetStatus("正在准备私发副本，请稍候…");
+        SetStatus(mode == PublishMode.Copy ? "正在准备私发副本…" : "引用原路径；移动或删除原文件后对方将无法下载。");
         try
         {
-            chatResourcePreparation = Task.Run(() => chat.QueuePrivateResource(peerId, path));
+            chatResourcePreparation = Task.Run(() => chat.QueuePrivateResource(peerId, path, mode, chatResourceCancellation.Token, progress));
             await chatResourcePreparation;
             if (exiting) return;
             RefreshChatTimeline();
             SetStatus("私发资源已加入聊天队列，不会出现在公开发布中。");
             await PumpChatSafeAsync();
         }
+        catch (OperationCanceledException) { SetStatus("已取消私发准备，未完成副本已清理。"); }
         catch (Exception ex) { ShowError("私发资源失败", ex); }
-        finally { preparingChatResource = false; RefreshChatHeader(); }
+        finally
+        {
+            preparingChatResource = false; chatResourcePreparation = null;
+            chatResourceCancellation?.Dispose(); chatResourceCancellation = null;
+            ChatPreparationPanel.Visibility = Visibility.Collapsed;
+            RefreshChatHeader();
+        }
     }
 
     private async void ChatPublishedResource_Click(object sender, RoutedEventArgs e)
@@ -268,10 +292,22 @@ public partial class MainWindow
         catch (Exception ex) { ShowError("发送资源卡片失败", ex); }
     }
 
-    private void ChatCancel_Click(object sender, RoutedEventArgs e)
+    private void ChatPreparationCancel_Click(object sender, RoutedEventArgs e) => chatResourceCancellation?.Cancel();
+
+    private async void ChatCleanup_Click(object sender, RoutedEventArgs e)
+    {
+        if (preparingChatResource) { SetStatus("请先取消或等待当前私发准备。"); return; }
+        try { var count = await Task.Run(store.CleanOrphanPrivateCopies); SetStatus($"已清理 {count} 个无记录的私发残留；有效附件保持可下载。"); }
+        catch (Exception ex) { ShowError("清理残留失败", ex); }
+    }
+
+    private async void ChatCancel_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not ChatMessageRow row) return;
-        try { chat.Cancel(row.Message.PeerId, row.Message.MessageId); RefreshChatTimeline(); }
+        if (row.Message.Kind == "PrivateResource" && System.Windows.MessageBox.Show(this,
+            "撤销后对方不能继续下载；本机副本将删除，引用原文件保持不变。已被对方下载的文件不会删除。", "撤销私发并清理",
+            MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+        try { await Task.Run(() => chat.Cancel(row.Message.PeerId, row.Message.MessageId)); RefreshChatTimeline(); }
         catch (Exception ex) { ShowError("取消发送失败", ex); }
     }
 
@@ -407,7 +443,8 @@ public sealed record ChatMessageRow(ChatMessage Message)
         "Canceled" => "已取消",
         _ => Message.State
     } : "";
-    public Visibility CancelVisibility => Message.Outgoing && Message.State == "Queued" ? Visibility.Visible : Visibility.Collapsed;
+    public string CancelLabel => Message.Kind == "PrivateResource" ? "撤销并清理" : "取消发送";
+    public Visibility CancelVisibility => Message.Outgoing && Message.State != "Canceled" && (Message.State == "Queued" || Message.Kind == "PrivateResource") ? Visibility.Visible : Visibility.Collapsed;
     public Visibility RetryVisibility => Message.Outgoing && Message.State == "Failed" ? Visibility.Visible : Visibility.Collapsed;
     public Visibility DownloadVisibility => !Message.Outgoing && Message.Kind is "Resource" or "PrivateResource" ? Visibility.Visible : Visibility.Collapsed;
 }

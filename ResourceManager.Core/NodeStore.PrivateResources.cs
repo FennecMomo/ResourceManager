@@ -30,4 +30,32 @@ public sealed partial class NodeStore
     {
         foreach (var resource in GetResources(peerId)) RemoveResource(resource.Id, peerId);
     }
+    // Explicit maintenance only; serialized with copying so in-progress roots cannot be collected.
+    public int CleanOrphanPrivateCopies()
+    {
+        lock (resourceCopyGate)
+        {
+            if (!Directory.Exists(PrivateResourceDirectory)) return 0;
+            HashSet<string> retained;
+            lock (gate)
+            {
+                using var db = Open();
+                using var command = Cmd(db, "SELECT id FROM private_resources UNION SELECT resource_id FROM chat_messages WHERE resource_id IS NOT NULL");
+                using var reader = command.ExecuteReader();
+                retained = [];
+                while (reader.Read()) retained.Add(reader.GetString(0));
+            }
+            var count = 0;
+            foreach (var root in Directory.EnumerateDirectories(PrivateResourceDirectory))
+            {
+                var id = Path.GetFileName(root);
+                if (id.Length != 72 || !id.StartsWith("private-", StringComparison.Ordinal) ||
+                    !id[8..].All(Uri.IsHexDigit) || retained.Contains(id)) continue;
+                if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0) continue;
+                Directory.Delete(root, true);
+                count++;
+            }
+            return count;
+        }
+    }
 }

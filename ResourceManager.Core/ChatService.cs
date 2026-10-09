@@ -46,13 +46,14 @@ public sealed class ChatService
         return message;
     }
 
-    public ChatMessage QueuePrivateResource(string peerId, string path)
+    public ChatMessage QueuePrivateResource(string peerId, string path, PublishMode mode = PublishMode.Copy,
+        CancellationToken cancellationToken = default, IProgress<long>? progress = null)
     {
         if (!store.GetPeerCapabilities(peerId).Contains(NodeDefaults.PrivateResourceCapability, StringComparer.Ordinal))
             throw new InvalidOperationException("对方版本不支持私发资源，请先升级到 0.4.4 或更新版本。");
-        var resource = store.AddResource(path, PublishMode.Copy, peerId);
+        var resource = store.AddResource(path, mode, peerId, cancellationToken: cancellationToken, progress: progress);
         ChatMessage message;
-        try { message = store.QueueChatMessage(peerId, "PrivateResource", null, resource.Id, resource.Name, clock()); }
+        try { cancellationToken.ThrowIfCancellationRequested(); message = store.QueueChatMessage(peerId, "PrivateResource", null, resource.Id, resource.Name, clock()); }
         catch { store.RemoveResource(resource.Id, peerId); throw; }
         MessageChanged?.Invoke(message);
         return message;
@@ -61,7 +62,8 @@ public sealed class ChatService
     public void Cancel(string peerId, string messageId)
     {
         var message = store.GetChatMessage(peerId, messageId, true);
-        if (message?.State != "Queued") throw new InvalidOperationException("只有排队中的消息可以取消。");
+        if (message is null || (message.Kind != "PrivateResource" && message.State != "Queued"))
+            throw new InvalidOperationException("只有排队消息或本人私发的资源可以取消或清理。");
         store.UpdateChatState(peerId, messageId, "Canceled", error: "已取消");
         if (message.Kind == "PrivateResource") store.RemoveResource(message.ResourceId!, peerId);
         MessageChanged?.Invoke(store.GetChatMessage(peerId, messageId, true)!);
@@ -188,6 +190,7 @@ public sealed class ChatService
             }
             store.UpdateChatState(peerId, message.MessageId, "Sending", incrementAttempt: true);
             MessageChanged?.Invoke(store.GetChatMessage(peerId, message.MessageId, true)!);
+            if (store.GetChatMessage(peerId, message.MessageId, true)?.State != "Sending") continue;
             var request = new ChatMessageRequest(NodeDefaults.ChatCapability, message.MessageId,
                 store.GetSettings().Profile.DeviceId, peerId, message.SentUtc, message.Kind,
                 message.Text, message.ResourceId);

@@ -220,9 +220,9 @@ public static class ResourceManagerMcpTools
         Call("retry_message", new { deviceId, messageId });
 
     [McpServerTool(Name = "resource_manager_send_private_resource", Destructive = false, OpenWorld = true),
-     Description("私发本机绝对路径的文件或文件夹，后台复制到私发队列并返回 operationId；完成后再查询消息投递状态。")]
-    public static Task<string> SendPrivateResource(string deviceId, string path) =>
-        Call("send_private_resource", new { deviceId, path });
+     Description("私发本机绝对路径的文件或文件夹，mode 可选 Reference（引用）或 Copy（默认副本），后台准备并返回 operationId；完成后再查询消息投递状态。")]
+    public static Task<string> SendPrivateResource(string deviceId, string path, string mode = "Copy") =>
+        Call("send_private_resource", new { deviceId, path, mode });
 
     [McpServerTool(Name = "resource_manager_get_private_resource_operation", ReadOnly = true, OpenWorld = false),
      Description("查询私发资源准备任务是否完成及生成的消息 ID；完成不代表对方已收到。")]
