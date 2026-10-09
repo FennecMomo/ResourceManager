@@ -13,6 +13,8 @@ public sealed class ChatService
     private readonly object rateGate = new();
     private readonly Dictionary<string, Queue<DateTimeOffset>> accepted = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> inFlight = new(StringComparer.Ordinal);
+    private DateTimeOffset nextProgressPoll;
+    private readonly SemaphoreSlim progressGate = new(1, 1);
     private readonly SemaphoreSlim pumpGate = new(1, 1);
 
     public event Action<ChatMessage>? MessageReceived;
@@ -152,8 +154,42 @@ public sealed class ChatService
             // One worker per device preserves that conversation's order without blocking other devices.
             var due = store.GetDueChatMessages(clock()).GroupBy(message => message.PeerId);
             await Task.WhenAll(due.Select(group => PumpPeerAsync(group.Key, cancellationToken))).ConfigureAwait(false);
+            await RefreshProgressAsync(cancellationToken).ConfigureAwait(false);
         }
         finally { pumpGate.Release(); }
+    }
+
+    public async Task RefreshProgressAsync(CancellationToken token = default)
+    {
+        if (!await progressGate.WaitAsync(0, token).ConfigureAwait(false)) return;
+        try
+        {
+            if (clock() < nextProgressPoll) return;
+            nextProgressPoll = clock().AddSeconds(10);
+            await Task.WhenAll(store.GetChatConversations().Where(c => !c.Removed).Select(async conversation =>
+            {
+                var peer = store.GetPeer(conversation.PeerId);
+                if (peer is null || !store.GetPeerCapabilities(peer.DeviceId).Contains(NodeDefaults.ChatProgressCapability)) return;
+                var messages = store.GetChatMessages(peer.DeviceId).Where(m => m.Outgoing && m.State == "Delivered")
+                    .Where(m => store.GetCachedChatProgress(peer.DeviceId, m.MessageId) is not { Read: true } previous ||
+                        m.Kind != "Text" && previous.DownloadState != "已完成").TakeLast(100).ToArray();
+                if (messages.Length == 0) return;
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeout.CancelAfter(TimeSpan.FromSeconds(4));
+                try
+                {
+                    var receipts = await client.GetChatProgressAsync(peer, messages.Select(m => m.MessageId).ToArray(), timeout.Token).ConfigureAwait(false);
+                    var changed = false;
+                    foreach (var receipt in receipts.Take(100))
+                        if (receipt is not null && messages.Any(m => m.MessageId == receipt.MessageId))
+                            changed |= store.SaveChatProgress(peer.DeviceId, receipt);
+                    if (changed) MessageChanged?.Invoke(messages[^1]);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException or InvalidOperationException)
+                { /* Keep the last observed receipt offline; UI labels its timestamp. */ }
+            })).ConfigureAwait(false);
+        }
+        finally { progressGate.Release(); }
     }
 
     private async Task PumpPeerAsync(string peerId, CancellationToken cancellationToken)

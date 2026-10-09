@@ -64,3 +64,5 @@ Codex 可以用 `codex mcp add resource-manager -- <打包 EXE 绝对路径> --m
 下载和上传工具返回任务 ID，用对应列表查看是否完成；私发与发布返回操作 ID，先查询准备结果，再查看消息或资源状态。服务器工具使用 `resource_manager_list_servers` 返回的绑定 ID，不接受任意服务端 URL。更新工具只检查候选和已有准备状态，安装换版仍遵守客户端现有校验与退出流程。所有写入工具使用固定操作及参数校验，不提供通用脚本执行入口。
 
 1.0.1：`resource_manager_send_private_resource` 支持可选 `mode`（`Reference` 或 `Copy`，默认 `Copy`）。准备阶段可以在客户端聊天页取消；`get_private_resource_operation` 可返回 `Canceled`。引用不复制原文件，原路径必须在接收方下载时仍可用。
+
+1.0.3：`list_messages` 的消息条目新增 `progress`，包含 `read`、`downloadState`、字节进度和 `observedUtc`。发送消息的值是最后取得的远端回执，可能为 null；该只读工具不主动标记已读。

@@ -51,6 +51,9 @@ public sealed record ChatReceipt(bool Accepted, string? Reason = null, int Statu
 public sealed record ChatMessage(string MessageId, string PeerId, bool Outgoing, string Kind, string? Text,
     string? ResourceId, string? ResourceName, DateTimeOffset SentUtc, DateTimeOffset? ReceivedUtc,
     string State, DateTimeOffset? NextAttemptUtc, int Attempts, string? Error);
+public sealed record ChatProgressReceipt(string MessageId, bool Read, string? DownloadState,
+    long DownloadedBytes, long TotalBytes, DateTimeOffset ObservedUtc);
+public sealed record ChatProgressQuery(string[] MessageIds);
 public sealed record ChatConversation(string PeerId, string Nickname, long Unread, DateTimeOffset? MutedUntilUtc,
     bool Removed, DateTimeOffset? LastMessageUtc);
 public sealed record AppSettings(NodeProfile Profile, int ListenPort, bool CloseToTray, bool AutoUpdate);
@@ -66,6 +69,7 @@ public static class NodeDefaults
     public const string ReminderCapability = "reminder-v1";
     public const string PrivateResourceCapability = "chat-private-resource-v1";
     public const string ChatCapability = "chat-v1";
+    public const string ChatProgressCapability = "chat-progress-v1";
     public static string LegacyDataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ResourceManager");
     public static string DataDirectory { get; private set; } = LegacyDataDirectory;
     public static void UseDataDirectory(string path) => DataDirectory = Path.GetFullPath(path);

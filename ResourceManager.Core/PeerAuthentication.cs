@@ -136,7 +136,7 @@ internal sealed class PeerAuthenticationHandler(NodeStore store, bool supportsRe
             var settings = store.GetSettings();
             var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability, PeerProof.Capability };
             if (supportsReminders) capabilities.Add(NodeDefaults.ReminderCapability);
-            if (supportsChat) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
+            if (supportsChat) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability, NodeDefaults.ChatProgressCapability]);
             var local = new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
                 capabilities.ToArray());
             using var request = new HttpRequestMessage(HttpMethod.Post, authority + "/api/v1/auth/hello") { Content = JsonContent.Create(local, options: PeerProof.Json) };

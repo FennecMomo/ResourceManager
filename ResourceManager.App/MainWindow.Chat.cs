@@ -113,7 +113,8 @@ public partial class MainWindow
         ChatMessages.Clear();
         var peerId = SelectedChatPeerId;
         if (peerId is null) { RefreshChatHeader(); return; }
-        foreach (var message in store.GetChatMessages(peerId)) ChatMessages.Add(new ChatMessageRow(message));
+        foreach (var message in store.GetChatMessages(peerId)) ChatMessages.Add(new ChatMessageRow(message, store.GetCachedChatProgress(peerId, message.MessageId),
+            store.GetPeerCapabilities(peerId).Contains(NodeDefaults.ChatProgressCapability)));
         if (IsChatForeground)
         {
             store.MarkChatRead(peerId);
@@ -424,7 +425,7 @@ public sealed record ChatConversationRow(string PeerId, string Name, string Stat
     public string UnreadText => Unread > 99 ? "99+" : Unread.ToString();
 }
 
-public sealed record ChatMessageRow(ChatMessage Message)
+public sealed record ChatMessageRow(ChatMessage Message, ChatProgressReceipt? Progress = null, bool SupportsProgress = false)
 {
     public string Author => Message.Outgoing ? "我" : "对方";
     public string Time => Message.SentUtc.ToLocalTime().ToString("MM-dd HH:mm");
@@ -438,7 +439,11 @@ public sealed record ChatMessageRow(ChatMessage Message)
     {
         "Queued" => "排队中" + (Message.Error is null ? "" : $" · {Message.Error}"),
         "Sending" => "发送中",
-        "Delivered" => "已送达",
+        "Delivered" => Progress is null ? "已送达 · " + (SupportsProgress ? "等待状态回执" : "对方版本不支持已读/下载回执")
+            : $"已送达 · {(Progress.Read ? "已读" : "未读")}" +
+              (Progress.DownloadState is null ? "" : $" · 附件{Progress.DownloadState}" +
+                  (Progress.DownloadState == "下载中" && Progress.TotalBytes > 0 ? $" {100.0 * Progress.DownloadedBytes / Progress.TotalBytes:F0}%" : "")) +
+              $" · 上次回执 {Progress.ObservedUtc.ToLocalTime():HH:mm:ss}",
         "Failed" => "失败" + (Message.Error is null ? "" : $" · {Message.Error}"),
         "Canceled" => "已取消",
         _ => Message.State

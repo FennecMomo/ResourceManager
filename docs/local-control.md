@@ -8,7 +8,7 @@
 
 Windows 客户端统一安装至 `%LOCALAPPDATA%\Programs\ResourceManager\ResourceManager.exe`。桌面快捷方式、开机启动和 Codex 的 `resource-manager` MCP 使用同一路径。应用内更新已按当前进程路径覆盖，因此从固定目录启动后继续原地更新。
 
-开发交付将成品构建到 `dist/client-staging`，先通过控制通道正常退出客户端，并确认目标文件没有 MCP 进程占用，再运行 `./scripts/install-desktop-shortcut.ps1 -SourceExe ./dist/client-staging/ResourceManager.exe`。脚本要求显式提供成品，校验复制前后 SHA-256 并更新快捷方式；不再默认安装历史 `dist/win-x64`。之后使用下述 Restart 命令启动固定路径并验证 ready、版本和实际路径，核对 MCP 注册，成功后清理暂存成品。脚本不强杀进程、不删除资料、不操作服务端；旧版没有控制通道时需用户正常退出一次。
+开发交付将成品构建到 `dist/client-staging`，先通过控制通道正常退出客户端，再运行 `./scripts/install-desktop-shortcut.ps1 -SourceExe ./dist/client-staging/ResourceManager.exe`。脚本要求显式提供成品，校验复制前后 SHA-256 并更新快捷方式；不再默认安装历史 `dist/win-x64`。之后使用下述 Restart 命令启动固定路径并验证 ready、版本和实际路径，核对 MCP 注册，成功后清理暂存成品。用户已授权脚本在核对路径和 `--mcp` 参数后终止占用安装 EXE 的 MCP 宿主；桌面客户端仍优先正常退出。脚本不删除资料、不操作服务端。
 
 在仓库根目录的 PowerShell 中运行：
 
@@ -28,7 +28,7 @@ Windows 客户端统一安装至 `%LOCALAPPDATA%\Programs\ResourceManager\Resour
 
 `shutdown` 遇到未保存设置、正在发布资源或正在准备私发副本会返回拒绝原因，不显示确认弹窗、不丢弃编辑、不强杀。其他下载沿用客户端正常退出时的暂停和保存逻辑。启动返回成功需要从新进程读回匹配的 EXE 路径、版本和 `ready: true`，不能仅凭启动命令成功判断。
 
-旧版 EXE 在运行时无法凭新文件获得管道能力。脚本发现旧版没有通道会保留它并明确报错；需要先经过一次正常退出和新版启动，此后的切换即可使用通道。不能为迁就旧版退回桌面自动化或强制终止。
+旧版 EXE 在运行时无法凭新文件获得管道能力。脚本发现旧版没有通道会保留它并明确报错；需要先经过一次正常退出和新版启动，此后的切换即可使用通道。不能为迁就旧版退回桌面自动化；必要的进程终止依照 AGENTS.md 的用户授权，核对身份并报告未保存内容风险。
 
 ## 后台启动
 

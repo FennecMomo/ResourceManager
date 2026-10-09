@@ -237,6 +237,12 @@ public sealed partial class NodeStore
                 update.Transaction = transaction;
                 update.ExecuteNonQuery();
             }
+            foreach (var table in new[] { "chat_progress_cache", "chat_download_progress" })
+            {
+                using var cleanup = Cmd(db, $"DELETE FROM {table} WHERE peer_id=$id", "$id", peerId);
+                cleanup.Transaction = transaction;
+                cleanup.ExecuteNonQuery();
+            }
             transaction.Commit();
         }
     }

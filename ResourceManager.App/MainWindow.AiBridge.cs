@@ -169,7 +169,8 @@ public partial class MainWindow
                         {
                             message.MessageId, message.Outgoing, message.Kind, message.Text,
                             message.ResourceId, message.ResourceName, message.SentUtc,
-                            message.ReceivedUtc, message.State, message.Error
+                            message.ReceivedUtc, message.State, message.Error,
+                            progress = message.Outgoing ? store.GetCachedChatProgress(peerId, message.MessageId) : store.GetLocalChatProgress(peerId, message.MessageId)
                         }).ToArray() });
                 }
                 case "send_message":

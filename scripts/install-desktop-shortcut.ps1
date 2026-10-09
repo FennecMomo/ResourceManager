@@ -16,8 +16,21 @@ $target = Join-Path $installDir 'ResourceManager.exe'
 if ($source -ne $target) {
     $running = @(Get-CimInstance Win32_Process -Filter "Name='ResourceManager.exe'" |
         Where-Object { $_.ExecutablePath -eq $target })
-    if ($running.Count -gt 0) {
-        throw 'Installation is in use. Gracefully stop the client and disconnect its MCP processes before replacing it; no process was killed.'
+    # The user authorized terminating stateless MCP hosts that lock the fixed EXE.
+    # Desktop clients still use the graceful local-control workflow first.
+    $desktopClients = @($running | Where-Object { $_.CommandLine -notmatch '(?:^|\s)--mcp(?:\s|$)' })
+    if ($desktopClients.Count -gt 0) {
+        throw 'Installation is in use by a desktop client. Gracefully stop it before replacing the EXE.'
+    }
+    foreach ($hostProcess in $running) {
+        $process = Get-Process -Id $hostProcess.ProcessId -ErrorAction SilentlyContinue
+        if ($null -eq $process) { continue }
+        $current = Get-CimInstance Win32_Process -Filter "ProcessId=$($hostProcess.ProcessId)"
+        if ($current.ExecutablePath -ne $target -or $current.CommandLine -notmatch '(?:^|\s)--mcp(?:\s|$)') {
+            throw 'MCP process identity changed; installation aborted.'
+        }
+        Stop-Process -Id $process.Id -Force -ErrorAction Stop
+        if (-not $process.WaitForExit(10000)) { throw 'MCP host did not exit.' }
     }
     $staged = Join-Path $installDir 'ResourceManager.exe.installing'
     try {

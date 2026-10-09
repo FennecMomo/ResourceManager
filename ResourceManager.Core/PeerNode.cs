@@ -47,7 +47,7 @@ public sealed class PeerNode : IAsyncDisposable
         var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability,
             "git-collaboration-v1", "resource-groups-v1", PeerProof.Capability, "resource-access-v1", "workspace-resources-v1" };
         if (reminders is not null) capabilities.Add(NodeDefaults.ReminderCapability);
-        if (chat is not null) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
+        if (chat is not null) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability, NodeDefaults.ChatProgressCapability]);
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
             capabilities.ToArray());
     }
@@ -78,7 +78,7 @@ public sealed class PeerNode : IAsyncDisposable
                     return;
                 }
             }
-            if (context.Request.Path.Value is "/api/v1/reminders" or "/api/v1/chat/messages")
+            if (context.Request.Path.Value is "/api/v1/reminders" or "/api/v1/chat/messages" or "/api/v1/chat/progress")
             {
                 var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
                 if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = ChatService.MaxBodyBytes;
@@ -178,6 +178,16 @@ public sealed class PeerNode : IAsyncDisposable
             }
             catch (ArgumentException) { return Results.BadRequest(); }
             catch (FileNotFoundException) { return Results.NotFound(); }
+        });
+        instance.MapPost("/api/v1/chat/progress", (ChatProgressQuery query, HttpContext context) =>
+        {
+            var visitor = Visitor(context);
+            if (chat is null || visitor is null || store.GetPeer(visitor) is null) return Results.StatusCode(403);
+            if (query.MessageIds is null || query.MessageIds.Length > 100 ||
+                query.MessageIds.Any(id => string.IsNullOrWhiteSpace(id) || id.Length > 64)) return Results.BadRequest();
+            var receipts = query.MessageIds.Distinct().Select(id => store.GetLocalChatProgress(visitor, id))
+                .Where(item => item is not null).ToArray();
+            return Results.Ok(receipts);
         });
         // Require both the unguessable per-message capability and the intended recipient's registered entry.
         string? PrivateRecipient(string id, HttpContext context)
@@ -310,7 +320,7 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
         var settings = store.GetSettings();
         var capabilities = new List<string> { NodeDefaults.RouterDiscoveryCapability, NodeDefaults.UpnpMappingCapability };
         if (supportsReminders) capabilities.Add(NodeDefaults.ReminderCapability);
-        if (supportsChat) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
+        if (supportsChat) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability, NodeDefaults.ChatProgressCapability]);
         var hello = new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort,
             settings.Profile.Avatar, capabilities.ToArray());
         using var response = await http.PostAsJsonAsync(new Uri(Base(ip, port), "hello"), hello, Json, cancellationToken)
@@ -470,6 +480,16 @@ public sealed class PeerClient(NodeStore store, bool supportsReminders = false, 
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<ReminderReceipt>(Json, cancellationToken).ConfigureAwait(false)
                ?? throw new InvalidDataException("对方未返回提醒结果。");
+    }
+
+    public async Task<ChatProgressReceipt[]> GetChatProgressAsync(PeerInfo peer, string[] messageIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (!store.GetPeerCapabilities(peer.DeviceId).Contains(NodeDefaults.ChatProgressCapability)) return [];
+        using var response = await http.PostAsJsonAsync(Route(peer, "chat/progress"), new ChatProgressQuery(messageIds), Json, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound) return [];
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ChatProgressReceipt[]>(Json, cancellationToken).ConfigureAwait(false) ?? [];
     }
 
     public async Task<ChatReceipt> SendChatAsync(PeerInfo peer, ChatMessageRequest message,

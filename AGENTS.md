@@ -1,10 +1,10 @@
 # 项目协作约定
 
-- Windows 客户端固定安装到 `%LOCALAPPDATA%\Programs\ResourceManager\ResourceManager.exe`。桌面快捷方式、开机启动和已注册的客户端 MCP 均指向这里；后续更新正常退出后覆盖此路径，不再直接运行 `dist` 下带版本号的目录。使用 `scripts/install-desktop-shortcut.ps1 -SourceExe <已验证成品>` 安装；构建使用固定暂存目录 `dist/client-staging`，交付后清理暂存成品，不累积历史客户端。清理前核对进程占用，保留用户资料、数据库备份和独立服务端；MCP 占用时报告待清理项，不强杀。
+- Windows 客户端固定安装到 `%LOCALAPPDATA%\Programs\ResourceManager\ResourceManager.exe`。桌面快捷方式、开机启动和已注册的客户端 MCP 均指向这里；后续更新正常退出后覆盖此路径，不再直接运行 `dist` 下带版本号的目录。使用 `scripts/install-desktop-shortcut.ps1 -SourceExe <已验证成品>` 安装；构建使用固定暂存目录 `dist/client-staging`，交付后清理暂存成品，不累积历史客户端。清理前核对进程占用，保留用户资料、数据库备份和独立服务端；MCP 占用安装文件时，已获用户授权自动终止对应 `ResourceManager.exe --mcp` 进程，覆盖后核对 MCP 注册。
 
 - 用户说“下一条”表示读取并讨论下一条 Issue/待办，说明问题、建议方案和待确认点，不代表授权直接修改、打包或发布；只有明确要求开始实现时才动代码。
 - 禁止使用 computer-use、桌面截图驱动操作、鼠标键盘注入、抢焦点或唤起窗口等会干扰用户其他工作的方式。检查和控制软件优先使用本机 API、命名管道、CLI 与隔离测试；能力缺失时补充明确的本机控制通道，不退回桌面自动化。
-- 本机检查默认只读、后台运行；切换测试版通过控制通道正常退出旧实例并后台启动新版，不操作独立反馈服务端。旧版不支持通道或存在未保存编辑时应明确报告，不强杀、不通过弹窗打断用户。
+- 本机检查默认只读、后台运行；切换测试版通过控制通道正常退出旧实例并后台启动新版，不操作独立反馈服务端。优先使用正常退出通道；旧版不支持通道或存在未保存编辑时应明确报告。用户已授权必要时终止阻止更新的 ResourceManager 进程；不得误终止独立反馈服务端，也不通过弹窗打断用户。
 - 客户端后台管理优先使用 `tools/client-control.ps1`（`Status` / `Shutdown` / `Restart`），协议和使用方法见 `docs/local-control.md`。检查状态不调用旧的单实例 `activate` 管道。新增测试应使用隔离资料和不显示窗口的测试进程。
 - 客户端 0.7.0 起提供 `ResourceManager.exe --mcp` 本机工具，工具清单与边界见 `docs/mcp.md`。后续打包并切换新客户端时，若本机 Codex 已注册 `resource-manager` MCP，更新其命令路径到新成品 EXE 并核对注册状态；不要改动其他 MCP 条目。
 - 每项更改确认完成并通过相关检查后，在开始下一项工作前，自动提交并推送到当前工作分支的远程跟踪分支，无需再次询问。

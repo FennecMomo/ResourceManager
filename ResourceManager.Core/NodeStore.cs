@@ -54,6 +54,8 @@ public sealed partial class NodeStore
             CREATE TABLE IF NOT EXISTS favorites (peer_id TEXT NOT NULL, resource_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(peer_id, resource_id));
             CREATE TABLE IF NOT EXISTS downloads (id TEXT PRIMARY KEY, peer_id TEXT NOT NULL, resource_id TEXT NOT NULL, resource_name TEXT NOT NULL, kind TEXT NOT NULL, target_path TEXT NOT NULL, status TEXT NOT NULL, downloaded_bytes INTEGER NOT NULL, total_bytes INTEGER NOT NULL, error TEXT);
             CREATE TABLE IF NOT EXISTS peer_capabilities (device_id TEXT PRIMARY KEY, capabilities TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS chat_progress_cache(peer_id TEXT NOT NULL,message_id TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(peer_id,message_id));
+            CREATE TABLE IF NOT EXISTS chat_download_progress(peer_id TEXT NOT NULL,message_id TEXT NOT NULL,state TEXT NOT NULL,done INTEGER NOT NULL,total INTEGER NOT NULL,PRIMARY KEY(peer_id,message_id));
             CREATE TABLE IF NOT EXISTS chat_conversations (peer_id TEXT PRIMARY KEY, nickname TEXT NOT NULL, read_through INTEGER NOT NULL DEFAULT 0, muted_until TEXT, removed INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS chat_messages (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT, message_id TEXT NOT NULL, peer_id TEXT NOT NULL,
@@ -730,6 +732,14 @@ public sealed partial class NodeStore
                 ON CONFLICT(id) DO UPDATE SET status=excluded.status,downloaded_bytes=excluded.downloaded_bytes,total_bytes=excluded.total_bytes,error=excluded.error
                 """, "$id", job.Id, "$peer", job.PeerId, "$resource", job.ResourceId, "$name", job.ResourceName, "$kind", job.Kind.ToString(), "$target", job.TargetPath, "$status", job.Status, "$done", job.DownloadedBytes, "$total", job.TotalBytes, "$error", job.Error);
             command.ExecuteNonQuery();
+            using var receipt = Cmd(db, """
+                INSERT INTO chat_download_progress(peer_id,message_id,state,done,total)
+                SELECT peer_id,message_id,$status,$done,$total FROM chat_messages
+                WHERE peer_id=$peer AND resource_id=$resource AND outgoing=0
+                ON CONFLICT(peer_id,message_id) DO UPDATE SET state=excluded.state,done=excluded.done,total=excluded.total
+                """, "$peer", job.PeerId, "$resource", job.ResourceId, "$status", job.Status,
+                "$done", job.DownloadedBytes, "$total", job.TotalBytes);
+            receipt.ExecuteNonQuery();
         }
     }
 

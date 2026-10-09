@@ -123,6 +123,13 @@ internal static partial class Program
         Require(privateStatus.Success && Data(privateStatus).GetProperty("state").GetString() == "Completed" &&
             store.GetChatMessages("peer").Any(item => item.Kind == "PrivateResource"),
             "MCP queues a private copy after completing its preparation operation");
+        var sample = store.GetChatMessages("peer").First() with { State = "Delivered", Kind = "PrivateResource", Outgoing = true };
+        Require(new ChatMessageRow(sample).StateText.Contains("不支持"), "legacy peers do not falsely show unread or download completion");
+        var receipt = new ChatProgressReceipt(sample.MessageId, true, "下载中", 50, 100, DateTimeOffset.UtcNow);
+        var row = new ChatMessageRow(sample, receipt, true);
+        Require(row.StateText.Contains("已读") && row.StateText.Contains("50%") && row.StateText.Contains("上次回执"),
+            "chat cards distinguish read, attachment progress and cached observation time");
+        Require(row.CancelVisibility == System.Windows.Visibility.Visible, "delivered private card still exposes revoke and cleanup");
         var revoked = await Call("revoke_publication", new { resourceId = publicationId });
         Require(revoked.Success && store.GetResource(publicationId!) is null && File.Exists(source),
             "MCP revokes a reference publication while preserving its original file");
