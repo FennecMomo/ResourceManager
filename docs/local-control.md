@@ -4,6 +4,12 @@
 
 ## 命令行
 
+### 固定客户端安装目录（1.0.0 部署约定）
+
+Windows 客户端统一安装至 `%LOCALAPPDATA%\Programs\ResourceManager\ResourceManager.exe`。桌面快捷方式、开机启动和 Codex 的 `resource-manager` MCP 使用同一路径。应用内更新已按当前进程路径覆盖，因此从固定目录启动后继续原地更新。
+
+开发交付将成品构建到 `dist/client-staging`，先通过控制通道正常退出客户端，并确认目标文件没有 MCP 进程占用，再运行 `./scripts/install-desktop-shortcut.ps1 -SourceExe ./dist/client-staging/ResourceManager.exe`。脚本要求显式提供成品，校验复制前后 SHA-256 并更新快捷方式；不再默认安装历史 `dist/win-x64`。之后使用下述 Restart 命令启动固定路径并验证 ready、版本和实际路径，核对 MCP 注册，成功后清理暂存成品。脚本不强杀进程、不删除资料、不操作服务端；旧版没有控制通道时需用户正常退出一次。
+
 在仓库根目录的 PowerShell 中运行：
 
 ```powershell
@@ -15,7 +21,7 @@
 
 # 等旧进程正常退出，再后台启动新版并核对路径、版本、共享服务状态
 ./tools/client-control.ps1 -Action Restart -ClientProcessId 12345 `
-  -ExecutablePath 'E:\etc\ResourceManager\dist\win-x64-0.4.5\ResourceManager.exe'
+  -ExecutablePath "$env:LOCALAPPDATA\Programs\ResourceManager\ResourceManager.exe"
 ```
 
 多实例时必须指定 PID。没有运行中的客户端时，`Restart` 可以直接后台启动指定版本。仅查询状态不会停止进程、打开主窗口或修改设置。
