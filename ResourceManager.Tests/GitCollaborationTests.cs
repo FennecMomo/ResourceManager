@@ -199,6 +199,41 @@ public sealed class GitCollaborationTests
         Assert.Equal(new byte[] { 5, 6, 7, 8, 9 }, File.ReadAllBytes(Path.Combine(clone, "large.bin")));
     }
 
+    [Fact]
+    public void LeaveProject_PersistsOptOut_StopsRelay_PreservesRepositoryAndSharedBundles()
+    {
+        using var space = new GitTestSpace();
+        var store = new GitCollaborationStore(space.PathFor("data"));
+        var repository = space.PathFor("repository");
+        Directory.CreateDirectory(repository);
+        File.WriteAllText(Path.Combine(repository, "uncommitted.txt"), "keep");
+        var hash = new string('b', 64);
+        var commit = new string('a', 40);
+        var path = Path.Combine(store.BundleDirectory, hash + ".bundle");
+        File.WriteAllText(path, "shared bundle");
+        var bundle = new GitBundleInfo(hash, 13, path);
+        var first = Guid.NewGuid().ToString("N");
+        var second = Guid.NewGuid().ToString("N");
+        foreach (var id in new[] { first, second })
+        {
+            store.CreateEvent(id, "project", "main", "device", "name", "Created", commit, null,
+                [new GitCommitPoint(commit, [], "initial", DateTimeOffset.UtcNow)], bundle);
+            store.SetBinding(new GitProjectBinding(id, repository, "main"));
+        }
+        var old = store.GetEvents(first).ToArray();
+        Assert.Equal(0, store.LeaveProject(first));
+        Assert.Null(store.GetBinding(first));
+        Assert.Empty(store.GetEvents(first));
+        Assert.DoesNotContain(store.GetMissing([]), item => item.ProjectId == first);
+        Assert.True(File.Exists(path));
+        var reopened = new GitCollaborationStore(space.PathFor("data"));
+        Assert.Equal(0, reopened.Merge(old));
+        Assert.DoesNotContain(reopened.GetProjects(), item => item.ProjectId == first);
+        Assert.Equal(13, reopened.LeaveProject(second));
+        Assert.False(File.Exists(path));
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(repository, "uncommitted.txt")));
+    }
+
     private static async Task CommitAsync(GitCommandRunner git, string root, string message)
     {
         await git.RunAsync(root, default, "add", ".");

@@ -558,11 +558,12 @@
                                     <StackPanel>
                                         <TextBlock x:Name="GitSelectedProjectText" Text="选择一个协作项目" Style="{StaticResource PageHeading}"/>
                                         <TextBlock x:Name="GitProjectStatusText" Text="项目中的每条线属于一台设备。" Style="{StaticResource Caption}" Margin="0,5,0,12" TextWrapping="Wrap"/>
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                        <WrapPanel Orientation="Horizontal" Margin="0,0,0,14">
                                             <Button x:Name="GitJoinButton" Content="加入并下载仓库" Click="GitJoin_Click" IsEnabled="False" Margin="0,0,8,0"/>
                                             <Button x:Name="GitPublishButton" Content="推送我的提交" Click="GitPublish_Click" IsEnabled="False" Margin="0,0,8,0"/>
                                             <Button x:Name="GitSyncButton" Content="同步选中的点" Click="GitSync_Click" IsEnabled="False" Style="{StaticResource SecondaryButton}"/>
-                                        </StackPanel>
+                                            <Button x:Name="GitLeaveButton" Content="退出本机协作" Click="GitLeave_Click" IsEnabled="False" Style="{StaticResource DangerButton}" Margin="8,0,0,0"/>
+                                        </WrapPanel>
                                         <TextBlock Text="协作图" Style="{StaticResource CardHeading}" Margin="0,0,0,6"/>
                                         <TextBlock Text="实心点是 Git 提交，空心点是加入或同步。点击点可查看详情。" Style="{StaticResource Caption}" Margin="0,0,0,8" TextWrapping="Wrap"/>
                                         <Border Background="#FAFCFF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="10" Height="330">

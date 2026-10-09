@@ -432,6 +432,7 @@ public sealed class GitCollaborationStore
                 : new GitState();
             state.Events ??= [];
             state.Bindings ??= [];
+            state.LeftProjects ??= [];
             if (state.Events.Any(item => item is null || !ValidShape(item) || !Verify(item)) ||
                 state.Events.GroupBy(item => item.ProjectId).Any(group => group.Count(item => item.Kind == "Created") != 1) ||
                 state.Bindings.Any(item => item is null || !Guid.TryParse(item.ProjectId, out _) ||
@@ -451,7 +452,7 @@ public sealed class GitCollaborationStore
 
     public IReadOnlyList<GitProjectEvent> GetEvents(string? projectId = null)
     {
-        lock (gate) return state.Events.Where(item => projectId is null || item.ProjectId == projectId).ToArray();
+        lock (gate) return state.Events.Where(item => !state.LeftProjects.Contains(item.ProjectId) && (projectId is null || item.ProjectId == projectId)).ToArray();
     }
 
     public GitLineVersion[] GetVersions()
@@ -467,7 +468,7 @@ public sealed class GitCollaborationStore
         {
             var cursors = known.GroupBy(item => (item.ProjectId, item.MemberId))
                 .ToDictionary(group => group.Key, group => group.Max(item => item.Sequence));
-            return state.Events.Where(item => item.Sequence > cursors.GetValueOrDefault((item.ProjectId, item.MemberId)))
+            return state.Events.Where(item => !state.LeftProjects.Contains(item.ProjectId) && item.Sequence > cursors.GetValueOrDefault((item.ProjectId, item.MemberId)))
                 .OrderBy(item => item.Kind == "Created" ? 0 : 1)
                 .ThenBy(item => item.ProjectId).ThenBy(item => item.MemberId).ThenBy(item => item.Sequence)
                 .Take(limit).ToArray();
@@ -488,9 +489,34 @@ public sealed class GitCollaborationStore
     {
         lock (gate)
         {
+            if (state.LeftProjects.Contains(binding.ProjectId)) throw new InvalidOperationException("此项目已在本机退出。");
             state.Bindings.RemoveAll(item => item.ProjectId == binding.ProjectId);
             state.Bindings.Add(binding);
             Persist();
+        }
+    }
+
+    public long LeaveProject(string projectId)
+    {
+        lock (gate)
+        {
+            if (!state.Events.Any(item => item.ProjectId == projectId)) throw new InvalidOperationException("协作项目不存在。");
+            var candidates = state.Events.Where(item => item.ProjectId == projectId && item.BundleHash is not null)
+                .Select(item => item.BundleHash!).Distinct().ToArray();
+            state.LeftProjects.Add(projectId);
+            state.Bindings.RemoveAll(item => item.ProjectId == projectId);
+            Persist(); // Persist the local opt-out before any cache cleanup; peers cannot reintroduce it.
+            var retained = state.Events.Where(item => !state.LeftProjects.Contains(item.ProjectId))
+                .Select(item => item.BundleHash).ToHashSet();
+            long removed = 0;
+            foreach (var hash in candidates.Where(hash => !retained.Contains(hash)))
+            {
+                var path = Path.Combine(bundleDirectory, hash + ".bundle");
+                if (!File.Exists(path)) continue;
+                try { var bytes = new FileInfo(path).Length; File.Delete(path); removed += bytes; }
+                catch (IOException ex) { throw new IOException("已退出协作；部分缓存仍被占用，未能清理。", ex); }
+            }
+            return removed;
         }
     }
 
@@ -519,7 +545,7 @@ public sealed class GitCollaborationStore
             var changed = 0;
             foreach (var item in incoming.OrderBy(item => item.Sequence))
             {
-                if (!ValidShape(item)) continue;
+                if (!ValidShape(item) || state.LeftProjects.Contains(item.ProjectId)) continue;
                 if (state.Events.Any(existing => existing.ProjectId == item.ProjectId &&
                     existing.MemberId == item.MemberId && existing.Sequence == item.Sequence)) continue;
                 if (!Verify(item)) continue;
@@ -560,7 +586,7 @@ public sealed class GitCollaborationStore
     {
         lock (gate)
         {
-            return state.Events.GroupBy(item => item.ProjectId).Select(group =>
+            return state.Events.Where(item => !state.LeftProjects.Contains(item.ProjectId)).GroupBy(item => item.ProjectId).Select(group =>
             {
                 var created = group.First(item => item.Kind == "Created");
                 return new GitProjectSummary(group.Key, created.ProjectName, created.DeviceId,
@@ -632,5 +658,6 @@ public sealed class GitCollaborationStore
     {
         public List<GitProjectEvent> Events { get; set; } = [];
         public List<GitProjectBinding> Bindings { get; set; } = [];
+        public HashSet<string> LeftProjects { get; set; } = [];
     }
 }

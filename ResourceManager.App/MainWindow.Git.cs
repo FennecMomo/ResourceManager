@@ -142,7 +142,7 @@ public partial class MainWindow
 
     private async Task RefreshGitAsync()
     {
-        if (gitRefreshBusy || exiting) return;
+        if (gitRefreshBusy || gitActionBusy || exiting) return;
         gitRefreshBusy = true;
         try
         {
@@ -153,7 +153,7 @@ public partial class MainWindow
         }
         catch (OperationCanceledException) when (exiting) { }
         catch (Exception ex) { GitProjectStatusText.Text = $"刷新协作图失败：{ex.Message}"; }
-        finally { gitRefreshBusy = false; }
+        finally { gitRefreshBusy = false; UpdateGitProjectActions(); }
     }
 
     private async Task<int> SyncGitPeersAsync()
@@ -213,9 +213,27 @@ public partial class MainWindow
             : binding is null ? $"{row.Project.MemberCount} 名成员 · 尚未加入 · 选择保存位置后下载仓库"
             : $"{row.Project.MemberCount} 名成员 · 已加入 · 本地仓库：{binding.RepositoryPath}";
         GitJoinButton.IsEnabled = row is not null && binding is null && gitRepository is not null && !gitActionBusy;
+        GitLeaveButton.IsEnabled = row is not null && !gitActionBusy && !gitRefreshBusy;
         GitPublishButton.IsEnabled = binding is not null && gitRepository is not null && !gitActionBusy;
         GitSyncButton.IsEnabled = binding is not null && selectedGitEvent is not null &&
                                   selectedGitEvent.MemberId != gitProjects.MemberId && gitRepository is not null && !gitActionBusy;
+    }
+
+    private async void GitLeave_Click(object sender, RoutedEventArgs e)
+    {
+        if (GitProjectList.SelectedItem is not GitProjectRow row || gitActionBusy || gitRefreshBusy) return;
+        if (System.Windows.MessageBox.Show(this,
+            $"退出“{row.Name}”？本机将不再同步或提供此协作项目，并清理专属协作缓存。本地仓库、未提交修改和其他成员已有的历史均保留。此项目不会因刷新自动重新加入。",
+            "退出本机 Git 协作", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+        gitActionBusy = true;
+        UpdateGitProjectActions();
+        try
+        {
+            var bytes = await Task.Run(() => gitProjects.LeaveProject(row.Project.ProjectId));
+            SetStatus($"已退出本机协作，清理 {bytes / 1048576.0:F1} MiB 缓存；本地仓库保持不变。");
+        }
+        catch (Exception ex) { ShowError("退出协作", ex); }
+        finally { gitActionBusy = false; RefreshGitProjectList(); RenderGitGraph(); }
     }
 
     private async Task<string> GetGitBundleAsync(GitProjectEvent item)
