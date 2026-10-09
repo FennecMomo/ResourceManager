@@ -131,13 +131,12 @@ public partial class MainWindow
             Favorites.Add(new(favorite, favorite.Name, $"{server?.Name ?? "已移除服务器"} / {owner} / {(favorite.ServerStored ? "服务器存储" : "本机发布")}", KindText(favorite.Kind), state, resource?.Note ?? ""));
         }
     }
-    private void DownloadServerFavorite(Favorite favorite)
+    private void DownloadServerFavorite(Favorite favorite, bool saveAs = false)
     {
         var row = Servers.FirstOrDefault(s => s.Binding.ServerId == favorite.ServerId); var catalog = row?.Catalogs.FirstOrDefault(c => c.Owner == favorite.PeerId);
         var resource = catalog?.Catalog.Resources.FirstOrDefault(r => r.Id == favorite.ResourceId && r.ServerStored == favorite.ServerStored); if (row is null || resource is null) return;
         var owner = row.Binding.Cached?.Members.FirstOrDefault(m => m.Profile.DeviceId == favorite.PeerId)?.Profile.Nickname ?? "未知设备";
-        using var dialog = new System.Windows.Forms.FolderBrowserDialog { Description = "选择服务器收藏的下载目录" }; if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
-        try { var job = downloader.CreateJob(new(favorite.PeerId, "", 0, owner, null, null), resource, dialog.SelectedPath); store.SaveServerDownload(job.Id, row.Binding.Id, owner, favorite.ServerStored); RefreshDownloadsView(); Tabs.SelectedIndex = 5; QueueDownload(job.Id); }
+        try { var job = ChooseDownloadJob(new(favorite.PeerId, "", 0, owner, null, null), resource, saveAs); if (job is null) return; store.SaveServerDownload(job.Id, row.Binding.Id, owner, favorite.ServerStored); RefreshDownloadsView(); Tabs.SelectedIndex = 5; QueueDownload(job.Id); }
         catch (Exception ex) { ShowError("创建下载失败", ex); }
     }
     private async void DeleteStored_Click(object sender, RoutedEventArgs e)

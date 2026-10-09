@@ -34,11 +34,10 @@ public partial class MainWindow
     {
         if (sender is not FrameworkElement { DataContext: ServerTabRow row } || row.SelectedMember is not { } member || row.SelectedResource?.RemoteRow is not { } selected) return;
         if (row.Status != "在线" || member.State != "在线" && !selected.Resource.ServerStored || !selected.Resource.Available) { SetStatus("服务器、发布者或资源当前不可用。"); return; }
-        using var dialog = new System.Windows.Forms.FolderBrowserDialog { Description = "选择服务器资源的下载保存目录" };
-        if (dialog.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
         try
         {
-            var job = downloader.CreateJob(WorkspacePeer(member), selected.Resource, dialog.SelectedPath);
+            var job = ChooseDownloadJob(WorkspacePeer(member), selected.Resource, IsSaveAs(sender));
+            if (job is null) return;
             store.SaveServerDownload(job.Id, row.Binding.Id, member.Nickname, selected.Resource.ServerStored);
             RefreshDownloadsView(); Tabs.SelectedIndex = 5; QueueDownload(job.Id);
         }

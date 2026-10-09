@@ -108,10 +108,11 @@ public sealed partial class ChatTests
             Assert.Equal(HttpStatusCode.BadRequest, traversal.StatusCode);
         }
         var downloads = new DownloadManager(b, clientB);
-        var job = downloads.CreateJob(peerA, resource, Path.Combine(b.DataDirectory, "downloads"));
+        var job = downloads.CreateJob(peerA, resource, Path.Combine(b.DataDirectory, "downloads"), folder ? null : "saved-as.txt");
         var done = await downloads.RunAsync(job.Id);
         Assert.Equal("已完成", done.Status);
         Assert.Equal("private snapshot contents", File.ReadAllText(folder ? Path.Combine(done.TargetPath, "private.txt") : done.TargetPath));
+        if (!folder) Assert.Equal("saved-as.txt", Path.GetFileName(done.TargetPath));
         if (folder) Assert.True(Directory.Exists(Path.Combine(done.TargetPath, "empty")));
         var storedPath = reopened.GetPrivateResource(resource.Id, peerB.DeviceId)!.SourcePath;
         reopened.ClearChatConversation(peerB.DeviceId);

@@ -304,7 +304,7 @@ public partial class MainWindow
         {
             var resource = await client.GetResourceAsync(peer, row.Message.ResourceId);
             if (resource is null || !resource.Available) { SetStatus("资源已撤销或原文件不可用。"); return; }
-            BeginDownload(peer, resource);
+            BeginDownload(peer, resource, IsSaveAs(sender));
         }
         catch (Exception ex) { ShowError("核对资源状态失败", ex); }
     }

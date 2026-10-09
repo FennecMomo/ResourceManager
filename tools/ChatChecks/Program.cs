@@ -142,6 +142,7 @@ internal static partial class Program
                 await CheckDeviceRefreshAsync(window, store);
                 await CheckAiBridgeAsync(window, store);
                 await CheckChatFilesAsync(window, store);
+                CheckDownloadDestination(window, store);
                 Require(!window.IsVisible && !((System.Windows.Forms.NotifyIcon)typeof(MainWindow).GetField("tray", Private)!.GetValue(window)!).Visible,
                     "all checks stayed hidden with no tray icon or desktop input");
                 Console.WriteLine($"PASS: {checks} isolated chat checks; IME events are simulated, no live input method or desktop is operated.");

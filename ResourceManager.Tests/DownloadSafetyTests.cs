@@ -12,6 +12,29 @@ public sealed class DownloadSafetyTests : IDisposable
         4, DateTimeOffset.UtcNow, true);
 
     [Fact]
+    public async Task SaveAs_PreservesRemoteIdentity_ResumesAtChosenName_AndReservesConflicts()
+    {
+        var store = new NodeStore(Path.Combine(root, "store"));
+        store.UpsertPeer(peer);
+        var client = new FakeClient(resource, (_, _) => Response("DATA"));
+        var manager = new DownloadManager(store, client);
+        var destination = Path.Combine(root, "chosen");
+        var job = manager.CreateJob(peer, resource, destination, "renamed.bin");
+        Assert.Equal("data.bin", job.ResourceName);
+        Assert.Equal("resource", job.ResourceId);
+        Assert.Equal(Path.Combine(destination, "renamed.bin"), job.TargetPath);
+        var collision = manager.CreateJob(peer, resource, destination, "renamed.bin");
+        Assert.Equal(Path.Combine(destination, "renamed (2).bin"), collision.TargetPath);
+        File.WriteAllText(job.TargetPath + ".rm-part", "OL");
+        File.WriteAllText(job.TargetPath + ".rm-etag", "\"old\"");
+        var reopened = new NodeStore(store.DataDirectory);
+        var result = await new DownloadManager(reopened, client).RunAsync(job.Id);
+        Assert.Equal(job.TargetPath, result.TargetPath);
+        Assert.Equal("DATA", File.ReadAllText(result.TargetPath));
+        Assert.Throws<InvalidDataException>(() => manager.CreateJob(peer, resource, destination, "../escape.bin"));
+    }
+
+    [Fact]
     public void QueuedJobsReserveDistinctPathsAcrossManagersBeforeAnyDataExists()
     {
         var store = new NodeStore(Path.Combine(root, "store"));

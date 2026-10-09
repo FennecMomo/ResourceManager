@@ -4,8 +4,8 @@ namespace ResourceManager.Core;
 
 public sealed class DownloadManager(NodeStore store, IResourceClient client, Func<DownloadJob, PeerInfo?>? resolvePeer = null)
 {
-    public DownloadJob CreateJob(PeerInfo peer, RemoteResource resource, string destinationDirectory) =>
-        store.CreateDownload(peer, resource, destinationDirectory);
+    public DownloadJob CreateJob(PeerInfo peer, RemoteResource resource, string destinationDirectory, string? localName = null) =>
+        store.CreateDownload(peer, resource, destinationDirectory, localName);
 
     public async Task<DownloadJob> RunAsync(string jobId, IProgress<DownloadJob>? progress = null, CancellationToken cancellationToken = default)
     {

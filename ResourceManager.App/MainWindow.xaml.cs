@@ -1234,29 +1234,29 @@ public partial class MainWindow : Window
     {
         if (PeersGrid.SelectedItem is not PeerRow peer || SelectedRemoteResource is not ResourceRow row) return;
         if (peer.Status != "在线" || !row.Resource.Available) { SetStatus("资源当前不可下载。"); return; }
-        BeginDownload(peer.Peer, row.Resource);
+        BeginDownload(peer.Peer, row.Resource, IsSaveAs(sender));
     }
 
     private void DownloadFavorite_Click(object sender, RoutedEventArgs e)
     {
         if (FavoritesGrid.SelectedItem is not FavoriteRow row) return;
         if (row.Status != "可下载") { SetStatus("该收藏当前不可下载。"); return; }
-        if (row.Favorite.ServerId is not null) { DownloadServerFavorite(row.Favorite); return; }
+        if (row.Favorite.ServerId is not null) { DownloadServerFavorite(row.Favorite, IsSaveAs(sender)); return; }
         var peer = store.GetPeer(row.Favorite.PeerId);
         var resource = peerCatalogs.GetValueOrDefault(row.Favorite.PeerId)?.FirstOrDefault(r => r.Id == row.Favorite.ResourceId);
-        if (peer is not null && resource is not null) BeginDownload(peer, resource);
+        if (peer is not null && resource is not null) BeginDownload(peer, resource, IsSaveAs(sender));
     }
 
-    private void BeginDownload(PeerInfo peer, RemoteResource resource)
+    private void BeginDownload(PeerInfo peer, RemoteResource resource, bool saveAs = false)
     {
-        using var dialog = new WinForms.FolderBrowserDialog { Description = "选择下载保存目录" };
-        if (dialog.ShowDialog() != WinForms.DialogResult.OK) return;
         try
         {
-            var job = downloader.CreateJob(peer, resource, dialog.SelectedPath);
+            var job = ChooseDownloadJob(peer, resource, saveAs);
+            if (job is null) return;
             RefreshDownloadsView();
             Tabs.SelectedIndex = 5;
             QueueDownload(job.Id);
+            SetStatus($"下载保存位置：{job.TargetPath}");
         }
         catch (Exception ex) { ShowError("创建下载失败", ex); }
     }
