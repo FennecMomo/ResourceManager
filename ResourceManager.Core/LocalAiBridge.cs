@@ -20,7 +20,7 @@ public sealed class LocalAiBridge : IDisposable, IAsyncDisposable
         "list_publications", "publish", "get_publication_operation", "list_conversations", "list_messages", "send_message", "send_resource_card",
         "list_servers", "list_server_resources", "list_downloads", "download_resource", "pause_download", "resume_download",
         "list_favorites", "add_favorite", "remove_favorite", "set_publication_note", "move_publication",
-        "set_group_permission", "set_server_publication", "revoke_publication", "list_uploads",
+        "set_group_permission", "set_server_publication", "revoke_publication", "replace_publication_reference", "list_uploads",
         "upload_to_server", "pause_upload", "resume_upload", "set_stored_permission", "delete_stored_resource",
         "mute_conversation", "retry_message", "send_private_resource", "get_private_resource_operation",
         "check_updates", "get_update_status"

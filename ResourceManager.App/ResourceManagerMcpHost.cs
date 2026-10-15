@@ -175,6 +175,11 @@ public static class ResourceManagerMcpTools
     public static Task<string> SetServerPublication(string serverId, string kind, string id, bool enabled) =>
         Call("set_server_publication", new { serverId, kind, id, enabled });
 
+    [McpServerTool(Name = "resource_manager_replace_publication_reference", Destructive = true, OpenWorld = true),
+     Description("更换本机发布的文件或文件夹引用，保留 ID、名称、备注和分组权限。旧管理副本在切换成功后清理；被引用或占用时保留并返回 CleanupWarning。新路径须存在、类型一致且位于管理副本目录以外。")]
+    public static Task<string> ReplacePublicationReference(string resourceId, string sourcePath) =>
+        Call("replace_publication_reference", new { resourceId, sourcePath });
+
     [McpServerTool(Name = "resource_manager_revoke_publication", Destructive = true, OpenWorld = true),
      Description("撤销本机发布项。引用发布保留原文件；副本发布会删除 ResourceManager 管理的副本。")]
     public static Task<string> RevokePublication(string resourceId) =>

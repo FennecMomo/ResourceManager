@@ -172,8 +172,8 @@ public sealed class PeerNode : IAsyncDisposable
                 var file = catalog.ResolveFile(id, path);
                 if (!file.Exists) return Results.NotFound();
                 var etag = new Microsoft.Net.Http.Headers.EntityTagHeaderValue(
-                    $"\"{file.Length:x}-{file.LastWriteTimeUtc.Ticks:x}\"");
-                return Results.File(File.OpenRead(file.FullName), "application/octet-stream", file.Name,
+                    ResourceCatalog.FileEtag(file));
+                return Results.File(new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete), "application/octet-stream", file.Name,
                     file.LastWriteTimeUtc, etag, enableRangeProcessing: true);
             }
             catch (ArgumentException) { return Results.BadRequest(); }

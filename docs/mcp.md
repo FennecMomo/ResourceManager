@@ -35,6 +35,7 @@ Codex 可以用 `codex mcp add resource-manager -- <打包 EXE 绝对路径> --m
 | `resource_manager_list_device_resources` | 按设备 ID 浏览已加载且有权访问的资源，支持名称/备注和类型筛选 | 只读 |
 | `resource_manager_search_resources` | 搜索已加载的在线设备和服务器目录，支持文字、类型、大小、来源及服务器/设备 ID 筛选 | 只读 |
 | `resource_manager_list_publications` | 查看本机发布项与分组，包括路径和发布方式 | 只读 |
+| `resource_manager_replace_publication_reference` | 用 resourceId 和 sourcePath 更换引用，保留 ID、名称、备注、分组；新路径须存在且类型一致。旧管理副本清理失败或仍被引用时返回 CleanupWarning | 修改发布并清理旧副本 |
 | `resource_manager_publish` | 根据绝对路径启动文件或文件夹发布，明确选择引用或复制及分组 | 新增公开发布 |
 | `resource_manager_get_publication_operation` | 按操作 ID 查询发布完成、失败及新资源 ID | 只读 |
 | `resource_manager_list_conversations` | 查看会话与未读数量，不标记已读 | 只读 |

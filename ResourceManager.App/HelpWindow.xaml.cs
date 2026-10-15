@@ -179,6 +179,7 @@ public partial class HelpWindow : Window
              new("resource_manager_add_favorite", "收藏资源"),
              new("resource_manager_remove_favorite", "移除收藏"),
              new("resource_manager_set_publication_note", "修改发布备注"),
+             new("resource_manager_replace_publication_reference", "更换发布引用，保留发布身份并清理旧副本"),
              new("resource_manager_move_publication", "移动发布项到分组"),
              new("resource_manager_set_group_permission", "设置分组访问权限"),
              new("resource_manager_set_server_publication", "设置服务器发布范围"),

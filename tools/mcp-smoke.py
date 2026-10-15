@@ -47,7 +47,8 @@ def main() -> None:
         listed = responses.get(timeout=10)
         assert listed.get("id") == 2 and "result" in listed, listed
         names = {tool["name"] for tool in listed["result"]["tools"]}
-        assert len(names) == 38, f"expected 38 MCP tools, found {len(names)}"
+        assert len(names) == 39, f"expected 39 MCP tools, found {len(names)}"
+        assert "resource_manager_replace_publication_reference" in names
         for name in ("resource_manager_download_resource",
                      "resource_manager_send_private_resource",
                      "resource_manager_upload_to_server",

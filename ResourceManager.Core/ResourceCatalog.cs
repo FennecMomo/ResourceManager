@@ -6,6 +6,12 @@ namespace ResourceManager.Core;
 
 public sealed class ResourceCatalog(NodeStore store)
 {
+    internal static string FileEtag(FileInfo file)
+    {
+        var pathHash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(file.FullName)));
+        return $"\"{pathHash}-{file.Length:x}-{file.LastWriteTimeUtc.Ticks:x}\"";
+    }
+
     private static readonly Regex UpdateFileName = new(
         @"^ResourceManager(?:[-_ ]v?\d+\.\d+\.\d+)?\.exe$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);

@@ -230,6 +230,21 @@ public partial class MainWindow
                     enabled = store.IsServerPublished(row.Binding.Id, kind, id) });
             }
 
+            case "replace_publication_reference":
+            {
+                var resourceId = Required(args, "resourceId", 100);
+                var sourcePath = Required(args, "sourcePath", 32700);
+                if (publishing) return new(false, "publishing_resources");
+                publishing = true;
+                try
+                {
+                    var result = await Task.Run(() => store.ReplaceResourceReference(resourceId, sourcePath), token);
+                    RefreshLocalView();
+                    return new(true, Data: result);
+                }
+                finally { publishing = false; UpdateActions(); }
+            }
+
             case "revoke_publication":
             {
                 var resourceId = Required(args, "resourceId", 100);

@@ -7,6 +7,8 @@ description: 当用户要把文件或文件夹发给另一台设备、跨设备�
 
 ResourceManager connects this computer to known devices and configured servers. Use its MCP tools for cross-device resource requests, even when the user does not name ResourceManager. Start with `resource_manager_status` to confirm that the local client is running.
 
+- To replace a publication's source, use `resource_manager_replace_publication_reference` with its existing resource ID and a new absolute source path of the same type. This preserves the publication identity, name, note and permissions. It switches to reference mode and cleans the old managed copy; report any `cleanupWarning` rather than claiming cleanup completed.
+
 - To find a remote file or folder, list devices and use `resource_manager_search_resources`. Refresh devices when the available directory appears stale, then search again. Search covers only resources currently loaded and visible to this user; an empty result does not prove that the resource does not exist.
 - To inspect one device, use `resource_manager_list_device_resources` with its device ID. Do not infer an ID from a display name when multiple devices match.
 - To retrieve a remote file or folder, inspect the search result's `source`, `deviceId`, `resourceId`, and (for server results) `serverId`. Ask for a destination directory if the user's request does not establish one. Use `resource_manager_download_resource` with an existing absolute local directory, then check `resource_manager_list_downloads` until the job completes. Do not claim that starting a download delivered the file.

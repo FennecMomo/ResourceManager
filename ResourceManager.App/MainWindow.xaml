@@ -501,6 +501,7 @@
                                     </WrapPanel>
                                     <WrapPanel Margin="0,12,0,0">
                                         <Button x:Name="LocalSendButton" Content="发送给" Click="SendSelectedPublication_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
+                                        <Button x:Name="ReplaceResourceButton" Content="更换引用" Click="ReplaceResource_Click" Margin="0,0,8,8" IsEnabled="False"/>
                                         <Button x:Name="RemoveResourceButton" Content="撤销所选发布" Click="RemoveResource_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" IsEnabled="False"/>
                                     </WrapPanel>
                                 </StackPanel>

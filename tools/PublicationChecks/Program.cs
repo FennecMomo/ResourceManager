@@ -57,11 +57,12 @@ internal static class Program
                 folderNode.IsSelected = true; Layout(); await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
                 Require(Control<TextBlock>("LocalDetailName").Text == publishedFolder.Name && Control<StackPanel>("LocalResourceActions").Visibility == Visibility.Visible,
                     "selected published folder displays details and publishing actions");
+                Require(Control<Button>("ReplaceResourceButton").IsEnabled, "published root allows replacing its reference");
                 Require(Control<TextBlock>("LocalDetailInfo").Text.Contains("项目资料 / 项目 A") && Control<TextBox>("LocalNoteBox").Text == "项目交付资料",
                     "details include group path and existing shared note");
                 var child = folderNode.Children.Single(n => n.Name == "项目说明.txt"); child.IsSelected = true; Layout();
                 Require(Control<TextBlock>("LocalDetailName").Text == child.Name && Control<StackPanel>("LocalResourceActions").Visibility == Visibility.Collapsed &&
-                    !Control<Button>("RemoveResourceButton").IsEnabled, "nested file displays details without pretending to be a separately revocable publication");
+                    !Control<Button>("RemoveResourceButton").IsEnabled && !Control<Button>("ReplaceResourceButton").IsEnabled, "nested file displays details without pretending to be a separately revocable publication");
                 var nested = folderNode.Children.Single(n => n.IsFolder); await window.LoadPublicationChildrenAsync(nested);
                 Require(nested.Children.Single().Name == "资料.txt", "nested folders expand correctly");
                 var defaultNode = window.LocalResourceTree.Single(n => n.GroupId == "default"); defaultNode.IsSelected = true; Layout();
@@ -103,6 +104,10 @@ internal static class Program
                 Require(failures.Count == 1 && store.GetResources().Count == beforeBatch + 2 && added.Any(r => r.Kind == ResourceKind.File) && added.Any(r => r.Kind == ResourceKind.Folder) && added.All(r => r.GroupId == sub.Id),
                     "mixed batch follows file/folder flow, preserves target group, and reports only failed paths");
                 Require(Control<Button>("PublishButton").IsEnabled, "publish button re-enables after partial batch failure");
+                var replaceResponse = await window.HandleAiBridgeAsync(new AiBridgeRequest(1, "replace_publication_reference", Environment.ProcessId,
+                    System.Text.Json.JsonSerializer.SerializeToElement(new { resourceId = publishedFile.Id, sourcePath = file })), default);
+                Require(replaceResponse.Success && store.GetResource(publishedFile.Id)!.Mode == PublishMode.Reference,
+                    "MCP replacement handler preserves publication and returns success without showing a dialog");
                 var remote = new ObservableCollection<ResourceTreeNode>();
                 var cyclic = MainWindow.BuildGroupTree([new("x", "X", "y", 1, DateTimeOffset.UtcNow), new("y", "Y", "x", 2, DateTimeOffset.UtcNow)], remote);
                 Require(remote.Count == 3 && cyclic.Count == 3, "malformed remote cycles are flattened without recursion");

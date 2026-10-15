@@ -685,6 +685,7 @@ public partial class MainWindow : Window
         RemovePeerButton.IsEnabled = peer is not null;
         PeerNoteButton.IsEnabled = peer is not null;
         RemoveResourceButton.IsEnabled = SelectedLocalResource is LocalResourceRow;
+        ReplaceResourceButton.IsEnabled = SelectedLocalResource is LocalResourceRow && !publishing;
         SaveLocalNoteButton.IsEnabled = SelectedLocalResource is LocalResourceRow;
         ClearLocalNoteButton.IsEnabled = SelectedLocalResource is LocalResourceRow localRow && !string.IsNullOrEmpty(localRow.Note);
         RemoveFavoriteButton.IsEnabled = FavoritesGrid.SelectedItem is FavoriteRow;
@@ -1093,6 +1094,37 @@ public partial class MainWindow : Window
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await RefreshAllAsync();
     private void RefreshLocal_Click(object sender, RoutedEventArgs e) => RefreshLocalView();
+
+    private async void ReplaceResource_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedLocalResource is not LocalResourceRow row || publishing) return;
+        string path;
+        if (row.Resource.Kind == ResourceKind.File)
+        {
+            var picker = new Microsoft.Win32.OpenFileDialog { Title = "选择新的文件引用", CheckFileExists = true };
+            if (picker.ShowDialog(this) != true) return;
+            path = picker.FileName;
+        }
+        else
+        {
+            var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择新的文件夹引用" };
+            if (picker.ShowDialog(this) != true) return;
+            path = picker.FolderName;
+        }
+        var cleanup = row.Resource.Mode == PublishMode.Copy ? "\n切换成功后清理软件管理的旧副本。" : "\n保留原位置的文件。";
+        if (System.Windows.MessageBox.Show($"将“{row.Name}”引用更换为：\n{path}\n\n保留发布名称、备注和权限；已有收藏继续指向此发布。{cleanup}",
+            "更换引用", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        publishing = true;
+        UpdateActions();
+        try
+        {
+            var result = await Task.Run(() => store.ReplaceResourceReference(row.Resource.Id, path));
+            RefreshLocalView();
+            SetStatus(result.CleanupWarning ?? "引用已更换，对方刷新后可下载新内容。");
+        }
+        catch (Exception ex) { ShowError("更换引用失败", ex); }
+        finally { publishing = false; UpdateActions(); }
+    }
 
     private async void RemoveResource_Click(object sender, RoutedEventArgs e)
     {
