@@ -180,6 +180,31 @@ public static class ResourceManagerMcpTools
     public static Task<string> ReplacePublicationReference(string resourceId, string sourcePath) =>
         Call("replace_publication_reference", new { resourceId, sourcePath });
 
+    [McpServerTool(Name = "resource_manager_request_ai_search", Destructive = false, OpenWorld = true),
+     Description("向已登记且可直连的设备申请 AI 文件查找。B 端需升级并配置 Codex CLI；默认由 B 端用户选目录授权，免授权只针对指定设备和目录。返回 requestId 对应的 id 与状态；建议传入稳定的 32 位无连字符 GUID requestId 以便网络失败后重试。")]
+    public static Task<string> RequestAiSearch(string deviceId, string question, string? requestId = null, string? scopeId = null) =>
+        Call("request_ai_search", new { deviceId, question, requestId, scopeId });
+
+    [McpServerTool(Name = "resource_manager_get_ai_request", ReadOnly = true, OpenWorld = true),
+     Description("查询远端 AI 查找请求，返回授权/运行/失败状态、回答及结果文件 ID；只有原请求设备可查询。不要把 Ready 当作文件已传回。")]
+    public static Task<string> GetAiRequest(string deviceId, string requestId) => Call("get_ai_request", new { deviceId, requestId });
+
+    [McpServerTool(Name = "resource_manager_continue_ai_request", Destructive = false, OpenWorld = true),
+     Description("在远端 AI 会话 Ready 后继续追问，沿用 B 端原授权目录；授权 30 分钟内最多 10 轮。")]
+    public static Task<string> ContinueAiRequest(string deviceId, string requestId, string question) => Call("continue_ai_request", new { deviceId, requestId, question });
+
+    [McpServerTool(Name = "resource_manager_send_ai_result", Destructive = false, OpenWorld = true),
+     Description("请 B 端把本次查找结果中的指定 fileId 作为私发副本传回原请求设备。异步返回 Sending；查询 Ready 后取得 messageId/resourceId，再通过消息与下载工具获取文件。不能传任意路径。")]
+    public static Task<string> SendAiResult(string deviceId, string requestId, string fileId) => Call("send_ai_result", new { deviceId, requestId, fileId });
+
+    [McpServerTool(Name = "resource_manager_cancel_ai_request", Destructive = false, OpenWorld = true),
+     Description("取消本人发起的远端 AI 查找会话并停止运行中的查找或文件副本准备；已送达的文件不因此删除。")]
+    public static Task<string> CancelAiRequest(string deviceId, string requestId) => Call("cancel_ai_request", new { deviceId, requestId });
+
+    [McpServerTool(Name = "resource_manager_list_ai_requests", ReadOnly = true, OpenWorld = false),
+     Description("读取本机收到的 AI 查找请求与结果，不批准请求、不配置免授权。授权操作由本机用户在 AI 请求窗口完成。")]
+    public static Task<string> ListAiRequests() => Call("list_ai_requests", new { });
+
     [McpServerTool(Name = "resource_manager_revoke_publication", Destructive = true, OpenWorld = true),
      Description("撤销本机发布项。引用发布保留原文件；副本发布会删除 ResourceManager 管理的副本。")]
     public static Task<string> RevokePublication(string resourceId) =>

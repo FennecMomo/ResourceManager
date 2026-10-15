@@ -22,6 +22,33 @@ public partial class MainWindow
         var args = request.Arguments;
         switch (request.Command)
         {
+            case "list_ai_requests":
+                return new(true, Data: new { requests = aiRequests.ListLocal().Select(AiRequestService.View).ToArray() });
+            case "request_ai_search":
+            case "get_ai_request":
+            case "continue_ai_request":
+            case "send_ai_result":
+            case "cancel_ai_request":
+            {
+                var peer = store.GetPeer(Required(args, "deviceId", 100)) ?? throw new ArgumentException("设备不存在。");
+                if (request.Command == "request_ai_search")
+                {
+                    var id = Optional(args, "requestId", 100) ?? Guid.NewGuid().ToString("N");
+                    var result = await client.CreateAiRequestAsync(peer,
+                        new AiSearchRequest(id, Required(args, "question", 4000), Optional(args, "scopeId", 100)), token);
+                    return new(true, Data: result);
+                }
+                var requestId = Required(args, "requestId", 100);
+                if (request.Command == "get_ai_request") return new(true, Data: await client.GetAiRequestAsync(peer, requestId, token));
+                var action = request.Command switch
+                {
+                    "continue_ai_request" => new AiSearchAction("continue", Required(args, "question", 4000)),
+                    "send_ai_result" => new AiSearchAction("send_file", FileId: Required(args, "fileId", 100)),
+                    _ => new AiSearchAction("cancel")
+                };
+                return new(true, Data: await client.ActAiRequestAsync(peer, requestId, action, token));
+            }
+
             case "list_servers":
                 return new(true, Data: new { servers = Servers.Select(row => new
                 {

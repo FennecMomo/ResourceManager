@@ -47,8 +47,10 @@ def main() -> None:
         listed = responses.get(timeout=10)
         assert listed.get("id") == 2 and "result" in listed, listed
         names = {tool["name"] for tool in listed["result"]["tools"]}
-        assert len(names) == 39, f"expected 39 MCP tools, found {len(names)}"
+        assert len(names) == 45, f"expected 45 MCP tools, found {len(names)}"
         assert "resource_manager_replace_publication_reference" in names
+        for name in ("request_ai_search", "get_ai_request", "continue_ai_request", "send_ai_result", "cancel_ai_request", "list_ai_requests"):
+            assert "resource_manager_" + name in names
         for name in ("resource_manager_download_resource",
                      "resource_manager_send_private_resource",
                      "resource_manager_upload_to_server",
@@ -63,6 +65,13 @@ def main() -> None:
             status = json.loads(called["result"]["content"][0]["text"])
             assert status["version"] == sys.argv[2], status
             print(f"PASS: MCP status reached running client version {status['version']}")
+            request({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+                "name": "resource_manager_list_ai_requests", "arguments": {}}})
+            called = responses.get(timeout=20)
+            assert called.get("id") == 4 and "result" in called, called
+            local_requests = json.loads(called["result"]["content"][0]["text"])
+            assert isinstance(local_requests.get("requests"), list), local_requests
+            print("PASS: MCP AI request listing reached the running client")
     finally:
         if process.stdin:
             process.stdin.close()

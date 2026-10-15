@@ -36,6 +36,12 @@ Codex 可以用 `codex mcp add resource-manager -- <打包 EXE 绝对路径> --m
 | `resource_manager_search_resources` | 搜索已加载的在线设备和服务器目录，支持文字、类型、大小、来源及服务器/设备 ID 筛选 | 只读 |
 | `resource_manager_list_publications` | 查看本机发布项与分组，包括路径和发布方式 | 只读 |
 | `resource_manager_replace_publication_reference` | 用 resourceId 和 sourcePath 更换引用，保留 ID、名称、备注、分组；新路径须存在且类型一致。旧管理副本清理失败或仍被引用时返回 CleanupWarning | 修改发布并清理旧副本 |
+| `resource_manager_request_ai_search` | 按 deviceId 向可直连设备申请 AI 查找；question 描述需求；可传稳定 requestId 和已知 scopeId | 向对方申请授权和使用其 Codex |
+| `resource_manager_get_ai_request` | 按 deviceId/requestId 查询远端状态、回答和文件 ID | 只读 |
+| `resource_manager_continue_ai_request` | Ready 后在同一授权目录继续提问 | 对方 AI 执行新一轮查找 |
+| `resource_manager_send_ai_result` | 按结果 fileId 请求私发副本；返回 Sending，稍后查询取得 messageId/resourceId | 对外发送文件 |
+| `resource_manager_cancel_ai_request` | 取消本人发起的远端查找或副本准备 | 取消任务 |
+| `resource_manager_list_ai_requests` | 查看本机收到的请求；不允许通过此工具批准授权 | 只读 |
 | `resource_manager_publish` | 根据绝对路径启动文件或文件夹发布，明确选择引用或复制及分组 | 新增公开发布 |
 | `resource_manager_get_publication_operation` | 按操作 ID 查询发布完成、失败及新资源 ID | 只读 |
 | `resource_manager_list_conversations` | 查看会话与未读数量，不标记已读 | 只读 |

@@ -56,6 +56,8 @@ Windows 客户端统一安装至 `%LOCALAPPDATA%\Programs\ResourceManager\Resour
 
 ## 验证
 
+1.1.0 状态增加 `aiRequests`（待批、查找中、复制中的请求数）和 `aiCodexConfigured`（已配置 CLI 路径是否存在）。退出会取消本机 AI 子进程与正在准备的结果副本，不自动重放。该状态不会批准任何请求或扩大目录授权。
+
 协议回归覆盖目标校验、命令白名单、大小限制、非法 JSON、空闲连接超时、异常恢复、拒绝退出和退出应答顺序。隔离 WPF 验证使用真实 `MainWindow` 控制处理器，全程不调用 `Show()`：查询返回 `windowVisible: false`；修改隔离昵称后拒绝退出；还原后正常退出。测试不启动发现服务，不接触用户资料，也不抢焦点。
 
 0.6.1 状态新增 `servers`、`connectedServers` 和 `editingServer`；服务器编辑/切换进行中拒绝后台退出，错误为 `editing_server`。正常退出会先取消在线名单长轮询，并尽力通知各服务器离线。

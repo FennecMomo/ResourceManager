@@ -193,7 +193,7 @@ public partial class MainWindow
                     return await HandleAdditionalAiBridgeAsync(request, token);
             }
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or UnauthorizedAccessException or System.Net.Http.HttpRequestException)
         {
             return new(false, ex.Message);
         }

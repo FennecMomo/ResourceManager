@@ -33,6 +33,8 @@ public partial class MainWindow
             activeUploads = activeUploads.Count,
             publishedResources = store.GetResources().Count,
             peers = store.GetPeers().Count,
+            aiRequests = aiRequests.ListLocal().Count(s => s.State is "AwaitingApproval" or "Running" or "Sending"),
+            aiCodexConfigured = System.IO.File.Exists(store.GetAiCodexExecutable()),
             status = StatusText.Text
         };
         if (request.Command == "status") return new(true, Data: state);

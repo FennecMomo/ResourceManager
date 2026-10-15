@@ -23,7 +23,8 @@ public sealed class LocalAiBridge : IDisposable, IAsyncDisposable
         "set_group_permission", "set_server_publication", "revoke_publication", "replace_publication_reference", "list_uploads",
         "upload_to_server", "pause_upload", "resume_upload", "set_stored_permission", "delete_stored_resource",
         "mute_conversation", "retry_message", "send_private_resource", "get_private_resource_operation",
-        "check_updates", "get_update_status"
+        "check_updates", "get_update_status", "request_ai_search", "get_ai_request", "continue_ai_request",
+        "send_ai_result", "cancel_ai_request", "list_ai_requests"
     ];
     private readonly CancellationTokenSource cancellation = new();
     private readonly Task listener;

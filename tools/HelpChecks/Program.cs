@@ -48,12 +48,17 @@ internal static class Program
 
                 var button = (Button)main.FindName("HelpButton");
                 var identity = (TextBlock)main.FindName("IdentityText");
-                var header = (Grid)VisualTreeHelper.GetParent(button);
+                var actionPanel = (StackPanel)VisualTreeHelper.GetParent(button);
+                var header = (Grid)VisualTreeHelper.GetParent(actionPanel);
                 var identityPanel = (StackPanel)VisualTreeHelper.GetParent(identity);
-                Require(Grid.GetColumn(identityPanel) == 1 && Grid.GetColumn(button) == 2, "help button follows local identity in header");
+                Require(Grid.GetColumn(identityPanel) == 1 && Grid.GetColumn(actionPanel) == 2, "help and AI buttons follow local identity in header");
                 var identityRight = identityPanel.TranslatePoint(new Point(identityPanel.ActualWidth, 0), header).X;
                 var buttonLeft = button.TranslatePoint(new Point(0, 0), header).X;
                 Require(button.ActualWidth >= 70 && identityRight + 10 <= buttonLeft, "help button and local identity do not overlap at minimum window size");
+                var aiButton = (Button)main.FindName("AiRequestsButton");
+                Require(aiButton.TranslatePoint(new Point(aiButton.ActualWidth, 0), header).X <= buttonLeft &&
+                    button.TranslatePoint(new Point(button.ActualWidth, 0), header).X <= header.ActualWidth + 0.5,
+                    "AI request and help buttons fit within header without overlap");
 
                 var navigation = (ListBox)main.FindName("NavList");
                 var tabs = (TabControl)main.FindName("Tabs");
@@ -107,7 +112,7 @@ internal static class Program
                 Require(help.Chapters.Select(c => c.Title).SequenceEqual(expected), "all modules and MCP have matching help chapters");
                 Require(help.Chapters.All(c => c.Steps.Count == 3 && c.Steps.All(s => !string.IsNullOrWhiteSpace(s.Screenshot)) && !string.IsNullOrWhiteSpace(c.Tip)),
                     "every chapter includes three screenshot steps and a note");
-                Require(help.Chapters.Last().Tools?.Count == 38, "MCP chapter documents every current tool");
+                Require(help.Chapters.Last().Tools?.Count == 45, "MCP chapter documents every current tool");
                 var aiChapter = help.Chapters.Last();
                 Require(aiChapter.AiSetupPrompt?.Contains("resource-manager/SKILL.md") == true &&
                     aiChapter.AiSetupPrompt.Contains("--mcp") && aiChapter.AiSetupPrompt.Contains("resource_manager_status"),

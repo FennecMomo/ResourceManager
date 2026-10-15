@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private readonly UpdateClient updateClient;
     private readonly ReminderService reminders;
     private readonly ChatService chat;
+    private readonly AiRequestService aiRequests;
     private readonly FeedbackStore feedbackStore = new();
     private readonly GitCollaborationStore gitProjects = new(NodeDefaults.DataDirectory);
     private readonly FeedbackSecretStore feedbackSecrets;
@@ -126,7 +127,9 @@ public partial class MainWindow : Window
         client = new PeerClient(store, supportsReminders: true, supportsChat: true);
         reminders = new ReminderService(store, client);
         chat = new ChatService(store, client);
-        node = new PeerNode(store, discovery, mappingManager, reminders, gitProjects, chat);
+        aiRequests = new AiRequestService(store, chat, new CodexFileFinder());
+        node = new PeerNode(store, discovery, mappingManager, reminders, gitProjects, chat, aiRequests);
+        aiRequests.Changed += () => Dispatcher.BeginInvoke(OnAiRequestsChanged);
         gatewayDiscovery = new GatewayDiscoveryService(store, client);
         downloader = new DownloadManager(store, client);
         catalog = new ResourceCatalog(store);
@@ -1070,6 +1073,7 @@ public partial class MainWindow : Window
         var choice = System.Windows.MessageBox.Show($"移除 {row.Nickname}？\n\n是：保留聊天记录（取消未送达消息）\n否：一并删除聊天记录\n取消：不移除设备\n\n收藏和本机备注都会删除，并从 {store.CountAllowedGroups(row.Peer.DeviceId)} 个分组的白名单中移除。",
             "移除设备", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         if (choice == MessageBoxResult.Cancel) return;
+        aiRequests.RevokeDevice(row.Peer.DeviceId);
         store.RemovePeer(row.Peer.DeviceId, deleteChatHistory: choice == MessageBoxResult.No);
         peerStatus.Remove(row.Peer.DeviceId);
         peerCatalogs.Remove(row.Peer.DeviceId);
@@ -2193,6 +2197,8 @@ public partial class MainWindow : Window
         if (editingServer || changingServer) { SetStatus("请先完成服务器编辑或连接操作，再退出。"); return; }
         if (!await CanExitWithSettingsAsync()) return;
         exiting = true;
+        aiRequestWindow?.Close();
+        await aiRequests.DisposeAsync();
         updateCancellation.Cancel();
         downloadCancellation.Cancel();
         await StopUploadsAsync();

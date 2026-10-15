@@ -17,6 +17,7 @@ public sealed class PeerNode : IAsyncDisposable
     private readonly UpnpPortMappingManager mappingManager;
     private readonly ReminderService? reminders;
     private readonly ChatService? chat;
+    private readonly AiRequestService? aiRequests;
     private readonly GitCollaborationStore gitProjects;
     private WebApplication? app;
 
@@ -27,12 +28,13 @@ public sealed class PeerNode : IAsyncDisposable
     }
 
     public PeerNode(NodeStore store, LanDiscoveryService discovery, UpnpPortMappingManager mappingManager,
-        ReminderService? reminders = null, GitCollaborationStore? gitProjects = null, ChatService? chat = null)
+        ReminderService? reminders = null, GitCollaborationStore? gitProjects = null, ChatService? chat = null, AiRequestService? aiRequests = null)
     {
         this.store = store;
         this.mappingManager = mappingManager;
         this.reminders = reminders;
         this.chat = chat;
+        this.aiRequests = aiRequests;
         this.gitProjects = gitProjects ?? new GitCollaborationStore(store.DataDirectory);
         catalog = new ResourceCatalog(store);
         routerDiscovery = new RouterDiscoveryCoordinator(store, discovery, mappingManager);
@@ -48,6 +50,7 @@ public sealed class PeerNode : IAsyncDisposable
             "git-collaboration-v1", "resource-groups-v1", PeerProof.Capability, "resource-access-v1", "workspace-resources-v1" };
         if (reminders is not null) capabilities.Add(NodeDefaults.ReminderCapability);
         if (chat is not null) capabilities.AddRange([NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability, NodeDefaults.ChatProgressCapability]);
+        if (aiRequests is not null) capabilities.Add(AiRequestService.Capability);
         return new PeerHello(settings.Profile.DeviceId, settings.Profile.Nickname, settings.ListenPort, settings.Profile.Avatar,
             capabilities.ToArray());
     }
@@ -78,7 +81,8 @@ public sealed class PeerNode : IAsyncDisposable
                     return;
                 }
             }
-            if (context.Request.Path.Value is "/api/v1/reminders" or "/api/v1/chat/messages" or "/api/v1/chat/progress")
+            if (context.Request.Path.Value is "/api/v1/reminders" or "/api/v1/chat/messages" or "/api/v1/chat/progress" ||
+                context.Request.Path.StartsWithSegments("/api/v1/ai"))
             {
                 var limit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
                 if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = ChatService.MaxBodyBytes;
@@ -110,6 +114,22 @@ public sealed class PeerNode : IAsyncDisposable
             return Results.Ok(Self());
         });
         string? Visitor(HttpContext context) => context.Items["VerifiedDevice"] as string;
+        IResult AiResult(HttpContext context, Func<string, AiSearchView> action)
+        {
+            if (aiRequests is null) return Results.NotFound();
+            if (Visitor(context) is not { } device || store.GetPeer(device) is null) return Results.StatusCode(403);
+            try { return Results.Ok(action(device)); }
+            catch (KeyNotFoundException) { return Results.NotFound(); }
+            catch (UnauthorizedAccessException) { return Results.StatusCode(403); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+        }
+        instance.MapPost("/api/v1/ai/requests", (AiSearchRequest request, HttpContext context) =>
+            AiResult(context, device => aiRequests!.Receive(device, request)));
+        instance.MapGet("/api/v1/ai/requests/{id}", (string id, HttpContext context) =>
+            AiResult(context, device => aiRequests!.Get(device, id)));
+        instance.MapPost("/api/v1/ai/requests/{id}/actions", (string id, AiSearchAction action, HttpContext context) =>
+            AiResult(context, device => aiRequests!.Act(device, id, action)));
         var workspacePublisher = new WorkspacePublisher(store);
         instance.MapPost("/api/v1/workspace-resource", async (WorkspaceResourceRequest request, HttpContext context, CancellationToken token) =>
         {
@@ -296,7 +316,7 @@ public sealed class PeerNode : IAsyncDisposable
     }
 }
 
-public sealed class PeerClient(NodeStore store, bool supportsReminders = false, bool supportsChat = false) : IDisposable, IResourceClient
+public sealed partial class PeerClient(NodeStore store, bool supportsReminders = false, bool supportsChat = false) : IDisposable, IResourceClient
 {
     private readonly HttpClient http = new(new PeerAuthenticationHandler(store, supportsReminders, supportsChat)) { Timeout = TimeSpan.FromSeconds(8) };
     private readonly HttpClient updateHttp = new(new PeerAuthenticationHandler(store, supportsReminders, supportsChat)) { Timeout = TimeSpan.FromMinutes(2) };

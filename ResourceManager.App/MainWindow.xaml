@@ -398,9 +398,12 @@
                         <TextBlock x:Name="IdentityText" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Ink}" TextAlignment="Right" TextTrimming="CharacterEllipsis"/>
                         <TextBlock x:Name="AddressText" Style="{StaticResource Caption}" TextAlignment="Right" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
                     </StackPanel>
-                    <Button x:Name="HelpButton" Grid.Column="2" Content="帮助" Click="Help_Click" Style="{StaticResource SecondaryButton}"
-                            Width="70" Height="34" Padding="10,0" Margin="22,0,0,0" VerticalAlignment="Center"
-                            ToolTip="打开使用帮助" AutomationProperties.Name="打开使用帮助"/>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
+                        <Button x:Name="AiRequestsButton" Content="AI 请求" Click="AiRequests_Click" Style="{StaticResource SecondaryButton}" Height="34" Padding="10,0"/>
+                        <Button x:Name="HelpButton" Content="帮助" Click="Help_Click" Style="{StaticResource SecondaryButton}"
+                                Width="70" Height="34" Padding="10,0" Margin="8,0,0,0"
+                                ToolTip="打开使用帮助" AutomationProperties.Name="打开使用帮助"/>
+                    </StackPanel>
                 </Grid>
             </Border>
 
