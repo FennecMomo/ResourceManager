@@ -329,6 +329,7 @@
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="设置"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE968;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="服务器"/></StackPanel></ListBoxItem>
                     <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE81C;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="更新历程"/></StackPanel></ListBoxItem>
+                    <ListBoxItem><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" FontFamily="Segoe MDL2 Assets" FontSize="17" Width="30"/><TextBlock Text="作品分享"/></StackPanel></ListBoxItem>
                 </ListBox>
                 <StackPanel Grid.Row="3">
                     <Border x:Name="StorageUsagePanel" Background="#F4F8FE" CornerRadius="12" Padding="13" Margin="0,0,0,10">
@@ -911,6 +912,7 @@
                     </Grid>
                 </TabItem>
                 <TabItem Header="更新历程"><local:ReleaseHistoryView x:Name="ReleaseHistory"/></TabItem>
+                <TabItem Header="作品分享"><local:ShareProjectsView x:Name="ShareProjects"/></TabItem>
             </TabControl>
 
             <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0">
