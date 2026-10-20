@@ -645,7 +645,7 @@ public partial class MainWindow : Window
             ("设置", "管理资料、连接方式和运行偏好"),
             ("服务器", "通过公网地址加入服务器，查看在线设备"),
             ("更新历程", "沿着时间轴回看每个版本的功能新增与变化"),
-            ("作品分享", "浏览慕沐在分享站发布的项目，在线体验或下载使用")
+            ("应用站", "按标签浏览应用、查看预览图，在线体验或下载使用")
         };
         var page = pages[Math.Clamp(Tabs.SelectedIndex, 0, pages.Length - 1)];
         PageTitleText.Text = page.Title;

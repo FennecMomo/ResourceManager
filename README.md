@@ -4,7 +4,7 @@ ResourceManager 用于设备之间的文件共享、聊天和资源管理。Wind
 
 | 组件 | 当前版本 | 运行环境与定位 |
 | --- | --- | --- |
-| Windows 客户端 | **1.1.1 测试版** | Windows x64，WPF 桌面程序，自包含单文件，无需另装 .NET |
+| Windows 客户端 | **1.1.2 测试版** | Windows x64，WPF 桌面程序，自包含单文件，无需另装 .NET |
 | Android 客户端 | **0.1.2 测试版** | Android 10 及以上，以会话和发送文件为主，目前限局域网互通 |
 | 独立服务器 | **0.3.0** | Windows / Linux x64，提供工作空间、资源中继、持久存储及反馈管理 |
 
@@ -96,7 +96,7 @@ MCP 通过当前 Windows 用户专用命名管道连接已经运行的客户端�
 
 ## 其他桌面功能
 
-- **作品分享：** “作品分享”页直接列出 [慕沐分享站](https://share.fennecmomo.top/) 上已发布的项目，支持关键词搜索、在线体验/下载筛选及项目详情。在线体验、项目网页和下载在默认浏览器中打开。首次进入时联网加载，点击“刷新”获取新发布内容；刷新失败保留本次会话已加载的列表。
+- **应用站：** “应用站”页直接列出 [慕沐应用站](https://share.fennecmomo.top/) 上已发布的项目，支持关键词、标签和在线体验/下载筛选，展示封面与预览截图。默认隐藏带“测试项目”标签或演示标记的项目，可勾选“显示测试项目”查看；直接选择“测试项目”标签也会显示。在线体验、项目网页和下载在默认浏览器中打开。首次进入时联网加载，点击“刷新”获取新发布内容；刷新失败保留本次会话已加载的列表，图片加载失败不影响项目详情和下载。
 - **Git 协作：** 从本地仓库建立项目、加入附近项目、查看各设备提交线，交换 Git bundle 与选中历史中的 LFS 对象。自动同步只允许快进；分叉进入收件引用等待处理。需要 Git，不替代完整 Git 客户端。
 - **反馈：** 通过局域网反馈服务提交问题和附件、查询处理状态；也可授权自己的 GitHub 账号提交。GitHub 集成要求配置 GitHub App Client ID，未配置的构建不能直接使用此入口；不内置共享访问令牌。
 - **后台管理：** [本机控制通道](docs/local-control.md)支持只读状态、正常退出和后台换版，无需激活窗口；有未保存编辑时自动退出会拒绝执行。
@@ -131,7 +131,7 @@ dotnet test ./ResourceManager.Tests/ResourceManager.Tests.csproj -c Release
 dotnet publish ./ResourceManager.App/ResourceManager.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -o ./dist/win-x64
 # 帮助与更新历程的隔离 WPF 检查，不显示窗口
 dotnet run --project ./tools/HelpChecks
-# 作品分享页的隔离 WPF 检查，不显示窗口
+# 应用站的隔离 WPF 检查，不显示窗口
 dotnet run --project ./tools/ShareChecks
 # 后台读取正在运行的客户端状态
 ./tools/client-control.ps1 -Action Status

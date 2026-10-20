@@ -79,8 +79,11 @@ public sealed class ShareCatalogTests
         Assert.Equal(["测试项目", "工具"], project.Tags);
         Assert.Equal("1.0.0", project.DisplayVersion);
         Assert.True(project.Demo);
+        Assert.True(project.IsTestProject);
         Assert.Equal("https://share.fennecmomo.top/?p=paper-notes", project.DetailsUrl.AbsoluteUri);
         Assert.Equal("https://share.fennecmomo.top/media/paper-notes/r/release/cover.svg", project.CoverUrl!.AbsoluteUri);
+        Assert.Equal("便签纸封面", project.CoverAlt);
+        Assert.Empty(project.Screenshots);
         Assert.Equal("https://share.fennecmomo.top/play/paper-notes/", project.WebUrl!.AbsoluteUri);
         var download = Assert.Single(project.Downloads);
         Assert.Equal("paper-notes-web-1.0.0.zip", download.FileName);
@@ -119,6 +122,7 @@ public sealed class ShareCatalogTests
         var project = Assert.Single((await ReadAsync(json)).Projects);
 
         Assert.Null(project.CoverUrl);
+        Assert.Null(project.CoverAlt);
         Assert.Null(project.WebUrl);
         Assert.Null(project.DisplayVersion);
         Assert.Equal(["desktop"], project.Categories);
@@ -140,6 +144,7 @@ public sealed class ShareCatalogTests
         {
             var project = root["projects"]![0]!;
             project["cover"]!["url"] = url;
+            project["screenshots"] = new JsonArray(new JsonObject { ["url"] = url, ["alt"] = "预览" });
             project["web"]!["publicUrl"] = url;
             project["downloads"]![0]!["publicUrl"] = url;
         });
@@ -147,6 +152,7 @@ public sealed class ShareCatalogTests
         var project = Assert.Single((await ReadAsync(json)).Projects);
 
         Assert.Null(project.CoverUrl);
+        Assert.Empty(project.Screenshots);
         Assert.Null(project.WebUrl);
         Assert.Empty(project.Downloads);
         Assert.Equal("https://share.fennecmomo.top/?p=paper-notes", project.DetailsUrl.AbsoluteUri);
@@ -161,6 +167,85 @@ public sealed class ShareCatalogTests
         var project = Assert.Single((await ReadAsync(json)).Projects);
 
         Assert.Equal("https://share.fennecmomo.top/play/paper-notes/", project.WebUrl!.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task ReadsScreenshotsInDisplayOrderAndAllowsMissingAlternativeText()
+    {
+        var json = Mutate(root => root["projects"]![0]!["screenshots"] = new JsonArray(
+            new JsonObject { ["url"] = "/media/paper-notes/first.png", ["alt"] = "初始界面" },
+            new JsonObject { ["url"] = "https://share.fennecmomo.top/media/paper-notes/second.svg" }));
+
+        var project = Assert.Single((await ReadAsync(json)).Projects);
+
+        Assert.Collection(project.Screenshots,
+            first =>
+            {
+                Assert.Equal("https://share.fennecmomo.top/media/paper-notes/first.png", first.Url.AbsoluteUri);
+                Assert.Equal("初始界面", first.Alt);
+            },
+            second =>
+            {
+                Assert.Equal("https://share.fennecmomo.top/media/paper-notes/second.svg", second.Url.AbsoluteUri);
+                Assert.Null(second.Alt);
+            });
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CatalogWithoutOptionalPreviewMetadataRemainsUsable(bool omitScreenshots)
+    {
+        var json = Mutate(root =>
+        {
+            var project = root["projects"]![0]!.AsObject();
+            project["cover"]!.AsObject().Remove("alt");
+            if (omitScreenshots) project.Remove("screenshots");
+            else project["screenshots"] = null;
+        });
+
+        var project = Assert.Single((await ReadAsync(json)).Projects);
+
+        Assert.NotNull(project.CoverUrl);
+        Assert.Null(project.CoverAlt);
+        Assert.Empty(project.Screenshots);
+        Assert.Single(project.Downloads);
+    }
+
+    [Fact]
+    public async Task SkipsUnavailableScreenshotEntriesWithoutLosingValidPreviews()
+    {
+        var json = Mutate(root => root["projects"]![0]!["screenshots"] = new JsonArray(
+            null, "unavailable", new JsonObject(),
+            new JsonObject { ["url"] = "" },
+            new JsonObject { ["url"] = "https://example.com/external.png" },
+            new JsonObject { ["url"] = "/media/paper-notes/valid.png", ["alt"] = "有效预览" }));
+
+        var project = Assert.Single((await ReadAsync(json)).Projects);
+
+        var preview = Assert.Single(project.Screenshots);
+        Assert.Equal("https://share.fennecmomo.top/media/paper-notes/valid.png", preview.Url.AbsoluteUri);
+        Assert.Equal("有效预览", preview.Alt);
+    }
+
+    [Theory]
+    [InlineData(true, "工具", true)]
+    [InlineData(false, "测试项目", true)]
+    [InlineData(true, "测试项目", true)]
+    [InlineData(false, "工具", false)]
+    [InlineData(false, "测试项目备份", false)]
+    [InlineData(false, "测试", false)]
+    public async Task RecognizesTestProjectsFromDemoFlagOrExactTag(bool demo, string tag, bool expected)
+    {
+        var json = Mutate(root =>
+        {
+            root["projects"]![0]!["demo"] = demo;
+            root["projects"]![0]!["tags"] = new JsonArray(tag);
+        });
+
+        var project = Assert.Single((await ReadAsync(json)).Projects);
+
+        Assert.Equal(expected, project.IsTestProject);
     }
 
     [Fact]

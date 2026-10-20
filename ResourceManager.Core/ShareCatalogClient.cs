@@ -10,7 +10,14 @@ public sealed record ShareCatalog(int SchemaVersion, long Revision, DateTimeOffs
 public sealed record ShareProject(string Id, string Slug, string Title, string Summary, string Description,
     IReadOnlyList<string> Categories, IReadOnlyList<string> Tags, string? DisplayVersion,
     DateTimeOffset? PublishedAt, DateTimeOffset? UpdatedAt, bool Demo, Uri DetailsUrl, Uri? CoverUrl,
-    Uri? WebUrl, IReadOnlyList<ShareDownload> Downloads);
+    Uri? WebUrl, IReadOnlyList<ShareDownload> Downloads)
+{
+    public string? CoverAlt { get; init; }
+    public IReadOnlyList<SharePreview> Screenshots { get; init; } = [];
+    public bool IsTestProject => Demo || Tags.Contains("测试项目", StringComparer.Ordinal);
+}
+
+public sealed record SharePreview(Uri Url, string? Alt);
 
 public sealed record ShareDownload(string FileName, string Platform, string? Version, long Size,
     string? Sha256, bool IsDefault, Uri DownloadUrl);
@@ -92,7 +99,11 @@ public sealed class ShareCatalogClient : IDisposable
                 ReadDate(item, "publishedAt"), ReadDate(item, "updatedAt"), item.GetProperty("demo").GetBoolean(),
                 new Uri(SiteUrl, "?p=" + Uri.EscapeDataString(slug)),
                 cover.ValueKind == JsonValueKind.Null ? null : ReadSiteUrl(cover, "url"),
-                web.ValueKind == JsonValueKind.Null ? null : ReadSiteUrl(web, "publicUrl"), downloads.AsReadOnly()));
+                web.ValueKind == JsonValueKind.Null ? null : ReadSiteUrl(web, "publicUrl"), downloads.AsReadOnly())
+            {
+                CoverAlt = cover.ValueKind == JsonValueKind.Null ? null : OptionalString(cover, "alt"),
+                Screenshots = ReadScreenshots(item)
+            });
         }
         return new ShareCatalog(schemaVersion, root.GetProperty("revision").GetInt64(),
             ReadDate(root, "generatedAt"), ReadDate(root, "serverTime"), ReadStrings(root, "tags"), projects.AsReadOnly());
@@ -114,6 +125,20 @@ public sealed class ShareCatalogClient : IDisposable
 
     private static DateTimeOffset? ReadDate(JsonElement item, string name) =>
         item.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null ? value.GetDateTimeOffset() : null;
+
+    private static IReadOnlyList<SharePreview> ReadScreenshots(JsonElement item)
+    {
+        if (!item.TryGetProperty("screenshots", out var screenshots) || screenshots.ValueKind == JsonValueKind.Null)
+            return [];
+        var previews = new List<SharePreview>();
+        foreach (var screenshot in screenshots.EnumerateArray())
+        {
+            if (screenshot.ValueKind != JsonValueKind.Object) continue;
+            if (ReadSiteUrl(screenshot, "url") is { } url)
+                previews.Add(new SharePreview(url, OptionalString(screenshot, "alt")));
+        }
+        return previews.AsReadOnly();
+    }
 
     private static Uri? ReadSiteUrl(JsonElement item, string name)
     {
