@@ -28,8 +28,8 @@ internal static class ScreenshotGenerator
         new("03", "02", 2, "GitProjectList", "选择协作项目", "GitScrollViewer", 78),
         new("03", "03", 2, "GitPublishButton", "推送提交"),
         new("04", "01", 3, "ChatConversationList", "选择会话", FocusHeight: 78),
-        new("04", "02", 3, "ChatInput", "输入消息"),
-        new("04", "03", 3, "ChatResourceButton", "发送资源卡片"),
+        new("04", "02", 3, "ChatInput", "发送文字 · Ctrl+V 粘贴图片"),
+        new("04", "03", 3, "ChatResourceButton", "其他文件或文件夹：发送资源"),
         new("05", "01", 0, "RemoteFavoriteButton", "加入收藏"),
         new("05", "02", 4, "FavoriteCheckButton", "检查状态"),
         new("05", "03", 4, "FavoriteDownloadButton", "下载收藏"),
@@ -48,7 +48,7 @@ internal static class ScreenshotGenerator
         new("10", "01", 0, "StatusText", "客户端保持运行")
     ];
 
-    internal static void Generate(MainWindow window, FrameworkElement root)
+    internal static void Generate(MainWindow window, FrameworkElement root, bool chatOnly = false)
     {
         Directory.CreateDirectory(Output);
         ((TextBlock)window.FindName("IdentityText")).Text = "示例用户";
@@ -58,8 +58,10 @@ internal static class ScreenshotGenerator
         ((TextBlock)window.FindName("GitEnvironmentText")).Text = "已找到 Git（演示资料）";
         ((TextBlock)window.FindName("StatusText")).Text = "演示资料已就绪，客户端正在运行";
         SeedDemonstrationRows(window);
+        if (chatOnly) SeedChatDemonstration(window);
         var tabs = (TabControl)window.FindName("Tabs");
-        foreach (var shot in Shots)
+        var selectedShots = chatOnly ? Shots.Where(shot => shot.Chapter == "04").ToArray() : Shots;
+        foreach (var shot in selectedShots)
         {
             tabs.SelectedIndex = shot.Page;
             Layout(root);
@@ -84,9 +86,29 @@ internal static class ScreenshotGenerator
             Console.WriteLine($"{shot.Chapter}-{shot.Step}: {shot.Target} {bounds}");
         }
 
-        Save(TerminalScreenshot("注册 MCP 服务", 2), "10-02.png");
-        Save(TerminalScreenshot("核对注册结果", 5), "10-03.png");
-        Console.WriteLine($"Generated {Shots.Length + 2} annotated help screenshots in {Output}");
+        if (!chatOnly)
+        {
+            Save(TerminalScreenshot("注册 MCP 服务", 2), "10-02.png");
+            Save(TerminalScreenshot("核对注册结果", 5), "10-03.png");
+        }
+        Console.WriteLine($"Generated {selectedShots.Length + (chatOnly ? 0 : 2)} annotated help screenshots in {Output}");
+    }
+
+    private static void SeedChatDemonstration(MainWindow window)
+    {
+        // Only the generator's isolated store is used; no peer services or sending pump run.
+        var store = new NodeStore();
+        var peer = new PeerInfo("guide-peer", "192.0.2.20", 37642, "示例同事电脑", null, null);
+        store.UpsertPeer(peer);
+        store.SavePeerCapabilities(peer.DeviceId, [NodeDefaults.ChatCapability, NodeDefaults.PrivateResourceCapability]);
+        var now = new DateTimeOffset(2026, 10, 21, 2, 30, 0, TimeSpan.Zero);
+        store.AcceptChatMessage(new ChatMessageRequest(NodeDefaults.ChatCapability, "guide-chat-received", peer.DeviceId,
+            store.GetSettings().Profile.DeviceId, now, "Text", "文字消息可以选择复制，也可以右键复制整段。"),
+            peer.Nickname, null, now);
+        store.QueueChatMessage(peer.DeviceId, "Text", "图片可直接拖入聊天区，或在输入框 Ctrl+V 粘贴。", null, null, now.AddMinutes(1));
+        ((ListBox)window.FindName("ChatConversationList")).SelectedItem = window.ChatConversations[0];
+        ((TextBlock)window.FindName("ChatPeerHint")).Text = "在线 · 离线时消息在本机排队";
+        ((TextBox)window.FindName("ChatInput")).Text = "在这里输入文字，或 Ctrl+V 粘贴图片";
     }
 
     private static void SeedDemonstrationRows(MainWindow window)

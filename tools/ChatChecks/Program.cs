@@ -142,6 +142,9 @@ internal static partial class Program
                 await CheckDeviceRefreshAsync(window, store);
                 await CheckAiBridgeAsync(window, store);
                 await CheckChatFilesAsync(window, store);
+                await CheckChatClipboardAsync(window, store);
+                await CheckChatImagesAsync(window, store);
+                await CheckChatTextCopyAsync(window, store);
                 CheckDownloadDestination(window, store);
                 Require(!window.IsVisible && !((System.Windows.Forms.NotifyIcon)typeof(MainWindow).GetField("tray", Private)!.GetValue(window)!).Visible,
                     "all checks stayed hidden with no tray icon or desktop input");

@@ -14,6 +14,11 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--chat-only") && !args.Contains("--generate-assets"))
+        {
+            Console.Error.WriteLine("--chat-only requires --generate-assets.");
+            return 2;
+        }
         NodeDefaults.UseDataDirectory(Path.GetFullPath(Path.Combine("dist", "help-checks", "data-" + Guid.NewGuid().ToString("N"))));
         if (args.Contains("--generate-assets"))
         {
@@ -41,7 +46,7 @@ internal static class Program
 
                 if (args.Contains("--generate-assets"))
                 {
-                    ScreenshotGenerator.Generate(main, root);
+                    ScreenshotGenerator.Generate(main, root, args.Contains("--chat-only"));
                     main.Close();
                     return;
                 }

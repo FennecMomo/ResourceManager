@@ -21,20 +21,28 @@ public partial class MainWindow
     private void ChatFiles_DragOver(object sender, System.Windows.DragEventArgs e)
     {
         // Leave ordinary text editing alone, including dragging selected text inside the composer.
-        if (!e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) return;
+        if (!e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop) && !HasChatBitmap(e.Data)) return;
         e.Handled = true;
-        e.Effects = CanSendPrivateFiles(SelectedChatPeerId) && ChatDropPaths(e.Data).Length > 0 &&
+        e.Effects = CanSendPrivateFiles(SelectedChatPeerId) && !preparingChatClipboardImage &&
+            (ChatDropPaths(e.Data).Length > 0 || HasChatBitmap(e.Data)) &&
             (e.AllowedEffects & System.Windows.DragDropEffects.Copy) != 0
             ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None;
     }
 
-    private void ChatFiles_Drop(object sender, System.Windows.DragEventArgs e)
+    private async void ChatFiles_Drop(object sender, System.Windows.DragEventArgs e)
     {
-        if (!e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) return;
+        if (!e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop) && !HasChatBitmap(e.Data)) return;
         e.Handled = true;
         e.Effects = System.Windows.DragDropEffects.None;
+        if ((e.AllowedEffects & System.Windows.DragDropEffects.Copy) == 0) return;
         var peerId = SelectedChatPeerId;
         if (!CanSendPrivateFiles(peerId)) { SetStatus("请先选择支持私发的设备，并等待当前准备完成。"); return; }
+        if (TryBeginChatImageSend(e.Data, peerId, true))
+        {
+            e.Effects = System.Windows.DragDropEffects.Copy;
+            await ChatClipboardPreparationTask;
+            return;
+        }
         var paths = ChatDropPaths(e.Data);
         if (paths.Length == 0) return;
         // Freeze both recipient and paths here; changing conversations while the menu is open cannot redirect a batch.

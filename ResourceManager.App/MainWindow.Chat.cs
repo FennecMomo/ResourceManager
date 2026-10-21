@@ -15,6 +15,8 @@ public partial class MainWindow
 
     private void InitializeChatEditor()
     {
+        InitializeChatClipboard();
+        InitializeChatImages();
         ApplyChatConversationLayout(store.GetChatConversationsCollapsed());
         TextCompositionManager.AddPreviewTextInputStartHandler(ChatInput, ChatCompositionStarted);
         TextCompositionManager.AddPreviewTextInputUpdateHandler(ChatInput, ChatCompositionStarted);
@@ -138,9 +140,9 @@ public partial class MainWindow
             : canChat ? $"{peerStatus.GetValueOrDefault(peer.DeviceId, "未检查")} · 离线时消息在本机排队"
                 : "此设备尚不支持 0.3.7 聊天";
         ChatSendButton.IsEnabled = canChat;
-        ChatResourceButton.IsEnabled = canChat && !preparingChatResource;
+        ChatResourceButton.IsEnabled = canChat && !preparingChatResource && !preparingChatClipboardImage;
         ChatMuteButton.IsEnabled = peer is not null || conversation is not null;
-        ChatClearButton.IsEnabled = conversation is not null && !preparingChatResource;
+        ChatClearButton.IsEnabled = conversation is not null && !preparingChatResource && !preparingChatClipboardImage;
         ChatMuteButton.Content = conversation?.MutedUntilUtc > DateTimeOffset.UtcNow ? "取消静音" : "静音 1 小时";
     }
 
@@ -204,7 +206,7 @@ public partial class MainWindow
     private async void SendPrivateChatResource(bool folder, PublishMode mode)
     {
         var peerId = SelectedChatPeerId;
-        if (peerId is null || preparingChatResource || exiting) return;
+        if (peerId is null || preparingChatResource || preparingChatClipboardImage || exiting) return;
         if (!store.GetPeerCapabilities(peerId).Contains(NodeDefaults.PrivateResourceCapability, StringComparer.Ordinal))
         {
             SetStatus("对方版本不支持私发资源，请先升级到 0.4.4 或更新版本并刷新连接。");
@@ -267,7 +269,7 @@ public partial class MainWindow
 
     private async void ChatCleanup_Click(object sender, RoutedEventArgs e)
     {
-        if (preparingChatResource) { SetStatus("请先取消或等待当前私发准备。"); return; }
+        if (preparingChatResource || preparingChatClipboardImage) { SetStatus("请先取消或等待当前私发准备。"); return; }
         try { var count = await Task.Run(store.CleanOrphanPrivateCopies); SetStatus($"已清理 {count} 个无记录的私发残留；有效附件保持可下载。"); }
         catch (Exception ex) { ShowError("清理残留失败", ex); }
     }
@@ -330,6 +332,7 @@ public partial class MainWindow
         try
         {
             store.ClearChatConversation(peerId);
+            ClearChatImageCache(peerId);
             RefreshChatTimeline();
             RefreshChatConversations();
         }
@@ -397,6 +400,10 @@ public sealed record ChatConversationRow(string PeerId, string Name, string Stat
 
 public sealed record ChatMessageRow(ChatMessage Message, ChatProgressReceipt? Progress = null, bool SupportsProgress = false)
 {
+    public bool IsImage => ChatImageService.IsImageMessage(Message);
+    public Visibility ImageVisibility => IsImage ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility BodyVisibility => IsImage ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility RegularDownloadVisibility => IsImage ? Visibility.Collapsed : DownloadVisibility;
     public string Author => Message.Outgoing ? "我" : "对方";
     public string Time => Message.SentUtc.ToLocalTime().ToString("MM-dd HH:mm");
     public string Body => Message.Kind switch

@@ -401,7 +401,7 @@ public partial class MainWindow
                 if (store.GetPeer(peerId) is null) return new(false, "device_not_found");
                 if (!store.GetPeerCapabilities(peerId).Contains(NodeDefaults.PrivateResourceCapability, StringComparer.Ordinal))
                     return new(false, "private_resource_not_supported");
-                if (preparingChatResource) return new(false, "private_resource_preparation_running");
+                if (preparingChatResource || preparingChatClipboardImage) return new(false, "private_resource_preparation_running");
                 foreach (var old in aiPrivateResourceOperations.Values.Where(item =>
                              item.State != "Running" && DateTimeOffset.UtcNow - item.StartedUtc > TimeSpan.FromDays(1))
                              .Select(item => item.Id).ToArray()) aiPrivateResourceOperations.Remove(old);

@@ -70,6 +70,19 @@
             </Setter>
         </Style>
         <!-- Height must come from a style: even a local Height="Auto" disables WPF MinLines/MaxLines. -->
+        <Style x:Key="ChatBubbleTextStyle" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+            <Setter Property="Height" Value="Auto"/><Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="14"/><Setter Property="VerticalContentAlignment" Value="Top"/>
+            <Setter Property="IsReadOnly" Value="True"/><Setter Property="IsReadOnlyCaretVisible" Value="False"/>
+            <Setter Property="TextWrapping" Value="Wrap"/><Setter Property="AcceptsReturn" Value="True"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
+                <ScrollViewer x:Name="PART_ContentHost" Focusable="False" Padding="0"
+                              HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled"/>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
         <Style x:Key="ChatComposerStyle" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
             <Setter Property="Height" Value="Auto"/>
             <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
@@ -637,12 +650,23 @@
                                                 </StackPanel>
                                                 <Border x:Name="MessageBubble" Background="White" BorderBrush="#E1E6EB" BorderThickness="1" CornerRadius="10" Padding="12,9">
                                                     <StackPanel>
-                                                        <TextBlock Text="{Binding Body}" Foreground="{StaticResource Ink}" FontSize="14" TextWrapping="Wrap"/>
+                                                        <TextBox x:Name="MessageText" Text="{Binding Body, Mode=OneWay}" Style="{StaticResource ChatBubbleTextStyle}"
+                                                                 Visibility="{Binding BodyVisibility}" AutomationProperties.Name="聊天消息文字">
+                                                            <TextBox.ContextMenu><ContextMenu>
+                                                                <MenuItem Header="复制" Click="ChatCopyText_Click"/>
+                                                                <MenuItem Header="全选" Command="ApplicationCommands.SelectAll"
+                                                                          CommandTarget="{Binding PlacementTarget, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"/>
+                                                            </ContextMenu></TextBox.ContextMenu>
+                                                        </TextBox>
+                                                        <local:ChatImageView Message="{Binding Message}" Visibility="{Binding ImageVisibility}"
+                                                            ImageLoader="{Binding ChatImageLoader, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                            CopyImage="{Binding ChatImageCopy, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                                            SaveImageAs="{Binding ChatImageSaveAs, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"/>
                                                         <StackPanel Orientation="Horizontal">
                                                             <Button Content="{Binding CancelLabel}" Click="ChatCancel_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding CancelVisibility}" Margin="0,6,7,0"/>
                                                             <Button Content="重试" Click="ChatRetry_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding RetryVisibility}" Margin="0,6,7,0"/>
-                                                            <Button Content="另存为…" Tag="SaveAs" Click="ChatDownload_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding DownloadVisibility}" Margin="0,6,7,0"/>
-                                                            <Button Content="下载资源" Click="ChatDownload_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding DownloadVisibility}" Margin="0,6,0,0"/>
+                                                            <Button Content="另存为…" Tag="SaveAs" Click="ChatDownload_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding RegularDownloadVisibility}" Margin="0,6,7,0"/>
+                                                            <Button Content="下载资源" Click="ChatDownload_Click" Style="{StaticResource QuietButton}" Height="26" Padding="7,0" Visibility="{Binding RegularDownloadVisibility}" Margin="0,6,0,0"/>
                                                         </StackPanel>
                                                     </StackPanel>
                                                 </Border>
@@ -666,7 +690,7 @@
                                     </StackPanel>
                                     <TextBox x:Name="ChatInput" Style="{StaticResource ChatComposerStyle}" MinLines="1" MaxLines="5" MaxLength="2000" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Top" Padding="11,8" PreviewKeyDown="ChatInput_PreviewKeyDown" AutomationProperties.Name="聊天消息"/>
                                     <Grid Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <TextBlock Text="Enter 发送 · Shift+Enter 换行 · 可拖入文件或文件夹" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                                        <TextBlock Text="Enter 发送 · Shift+Enter 换行 · Ctrl+V 粘贴图片 · 可拖入文件" Style="{StaticResource Caption}" VerticalAlignment="Center" TextWrapping="Wrap"/>
                                         <Button x:Name="ChatResourceButton" Grid.Column="1" Content="发送资源" Click="ChatResource_Click" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" IsEnabled="False"/>
                                         <Button x:Name="ChatSendButton" Grid.Column="2" Content="发送" Click="ChatSend_Click" Margin="8,0,0,0" IsEnabled="False"/>
                                     </Grid>

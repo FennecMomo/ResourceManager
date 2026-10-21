@@ -24,7 +24,7 @@ public partial class MainWindow
             unsavedSettings = unsaved,
             unreadChatMessages = chatUnreadCount,
             chatTrayFlashing = chatFlashing,
-            preparingPrivateResource = preparingChatResource,
+            preparingPrivateResource = preparingChatResource || preparingChatClipboardImage,
             publishingResources = publishing,
             editingServer = editingServer || changingServer,
             servers = Servers.Count,
@@ -40,7 +40,7 @@ public partial class MainWindow
         if (request.Command == "status") return new(true, Data: state);
         if (exiting) return new(true, Data: state);
         if (unsaved) return new(false, "unsaved_settings", state);
-        if (preparingChatResource) return new(false, "preparing_private_resource", state);
+        if (preparingChatResource || preparingChatClipboardImage) return new(false, "preparing_private_resource", state);
         if (editingServer || changingServer) return new(false, "editing_server", state);
         if (publishing) return new(false, "publishing_resources", state);
         return new(true, Data: state)

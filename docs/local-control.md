@@ -52,6 +52,8 @@ Windows 客户端统一安装至 `%LOCALAPPDATA%\Programs\ResourceManager\Resour
 
 0.5.0 增加 `publishingResources`（是否正在发布文件或文件夹）；发布期间拒绝后台退出，返回 `publishing_resources`，避免打断副本写入。
 
+1.1.3 起，`preparingPrivateResource` 也包括聊天剪贴板图片的编码和副本准备；此时后台退出返回 `preparing_private_resource`。正常退出会取消并等待这项准备结束，再清理本次生成的临时图片。
+
 退出确认先写回管道，再进入应用既有的 `ExitAsync`。`unsaved_settings`、`preparing_private_resource`、`publishing_resources`、`unsupported_command`、`invalid_protocol_or_process`、`invalid_request`、`handler_failed` 都是机器可读失败原因。
 
 ## 验证

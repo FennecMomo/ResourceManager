@@ -2199,9 +2199,13 @@ public partial class MainWindow : Window
         if (editingServer || changingServer) { SetStatus("请先完成服务器编辑或连接操作，再退出。"); return; }
         if (!await CanExitWithSettingsAsync()) return;
         exiting = true;
+        StopChatImages();
         aiRequestWindow?.Close();
         await aiRequests.DisposeAsync();
         updateCancellation.Cancel();
+        chatResourceCancellation?.Cancel();
+        try { await ChatClipboardPreparationTask; }
+        catch (Exception ex) { AppLog.Write("退出时等待聊天图片准备失败", ex); }
         downloadCancellation.Cancel();
         await StopUploadsAsync();
         await StopServersAsync();
